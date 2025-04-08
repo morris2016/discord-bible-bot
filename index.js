@@ -1,4 +1,4 @@
-require("libsodium-wrappers").ready;
+require("dotenv").config();
 const { Client, GatewayIntentBits } = require("discord.js");
 const {
   joinVoiceChannel,
@@ -7,28 +7,34 @@ const {
   AudioPlayerStatus,
   StreamType,
 } = require("@discordjs/voice");
+
 const fetch = require("node-fetch");
-const prism = require("prism-media");
 const ffmpeg = require("ffmpeg-static");
-require("dotenv").config();
+const { spawn } = require("child_process");
+
+// ⏱️ Optional: Needed if you want sodium to work everywhere
+require("libsodium-wrappers").ready;
 
 console.log("🚀 Bot is starting...");
+
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
 
 const CHANNEL_ID = process.env.CHANNEL_ID;
-const MANIFEST_URL = process.env.MANIFEST_URL || "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json";
-const AUDIO_BASE = process.env.AUDIO_BASE || "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/";
+const MANIFEST_URL = process.env.MANIFEST_URL;
+const AUDIO_BASE = process.env.AUDIO_BASE; // Ends with /
 
 console.log("📛 TOKEN:", process.env.TOKEN ? "Found" : "Missing");
 console.log("🎧 CHANNEL_ID:", CHANNEL_ID ? "Found" : "Missing");
 
 client.once("ready", async () => {
-  console.log("✅ Logged in as " + client.user.tag);
+  console.log(`✅ Logged in as ${client.user.tag}`);
 
   const voiceChannel = client.channels.cache.get(CHANNEL_ID);
-  if (!voiceChannel || voiceChannel.type !== 2) return console.error("❌ Invalid or missing voice channel.");
+  if (!voiceChannel || voiceChannel.type !== 2) {
+    return console.error("❌ Invalid or missing voice channel.");
+  }
 
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
@@ -39,11 +45,14 @@ client.once("ready", async () => {
   try {
     const res = await fetch(MANIFEST_URL);
     const manifest = await res.json();
-    const files = manifest.files || manifest;
+    const files = manifest.files;
 
-    if (!files || files.length === 0) return console.error("❌ No files in manifest");
+    if (!files || files.length === 0) {
+      return console.error("❌ No files in manifest");
+    }
 
     console.log("📦 Manifest fetched:", files);
+
     const player = createAudioPlayer();
     let index = 0;
 
@@ -51,22 +60,19 @@ client.once("ready", async () => {
       const url = `${AUDIO_BASE}${files[index]}`;
       console.log("🎧 Now playing:", url);
 
-      const stream = new prism.FFmpeg({
-        args: [
-          "-reconnect", "1",
-          "-reconnect_streamed", "1",
-          "-reconnect_delay_max", "5",
-          "-i", url,
-          "-analyzeduration", "0",
-          "-loglevel", "0",
-          "-f", "s16le",
-          "-ar", "48000",
-          "-ac", "2",
-        ],
-        executable: ffmpeg,
-      });
+      const ffmpegProcess = spawn(ffmpeg, [
+        "-reconnect", "1",
+        "-reconnect_streamed", "1",
+        "-reconnect_delay_max", "5",
+        "-i", url,
+        "-analyzeduration", "0",
+        "-loglevel", "error",
+        "-f", "s16le",
+        "-ar", "48000",
+        "-ac", "2"
+      ], { stdio: ["pipe", "pipe", "inherit"] });
 
-      const resource = createAudioResource(stream, {
+      const resource = createAudioResource(ffmpegProcess.stdout, {
         inputType: StreamType.Raw,
       });
 
@@ -74,10 +80,14 @@ client.once("ready", async () => {
       index = (index + 1) % files.length;
     };
 
-    player.on(AudioPlayerStatus.Idle, playNext);
-    player.on("error", (err) => {
-      console.error("Audio error:", err.message);
-      playNext(); // Skip on error
+    player.on(AudioPlayerStatus.Idle, () => {
+      console.log("⏭️ Track ended, playing next...");
+      playNext();
+    });
+
+    player.on("error", (error) => {
+      console.error("⚠️ Audio error:", error.message);
+      playNext(); // Skip to next on error
     });
 
     connection.subscribe(player);
