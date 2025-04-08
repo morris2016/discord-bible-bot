@@ -18,3 +18,4 @@ COPY . .
 
 # Start the bot
 CMD ["node", "index.js"]
+# Triggering rebuild - April 8
