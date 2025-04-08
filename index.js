@@ -1,22 +1,35 @@
-const { Client, GatewayIntentBits } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus } = require('@discordjs/voice');
-const fetch = require('node-fetch');
-require('dotenv').config();
+// Import order matters!
+require("libsodium-wrappers").ready;
+
+const { Client, GatewayIntentBits } = require("discord.js");
+const {
+  joinVoiceChannel,
+  createAudioPlayer,
+  createAudioResource,
+  AudioPlayerStatus,
+} = require("@discordjs/voice");
+const fetch = require("node-fetch");
+require("dotenv").config();
 
 console.log("🚀 Bot is starting...");
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates] });
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+});
+
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const MANIFEST_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json";
-const BASE_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev";
+const BASE_AUDIO_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/";
 
 console.log("📛 TOKEN:", process.env.TOKEN ? "Found" : "Missing");
-console.log("🎧 CHANNEL_ID:", process.env.CHANNEL_ID ? "Found" : "Missing");
+console.log("🎧 CHANNEL_ID:", CHANNEL_ID ? "Found" : "Missing");
 
-client.once('ready', async () => {
+client.once("ready", async () => {
   console.log("✅ Logged in as " + client.user.tag);
 
   const voiceChannel = client.channels.cache.get(CHANNEL_ID);
-  if (!voiceChannel || voiceChannel.type !== 2) return console.error("❌ Invalid or missing voice channel.");
+  if (!voiceChannel || voiceChannel.type !== 2) {
+    return console.error("❌ Invalid or missing voice channel.");
+  }
 
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
@@ -29,16 +42,18 @@ client.once('ready', async () => {
     const manifest = await res.json();
     const files = manifest.files;
 
-    console.log("📦 Manifest fetched:", files);
+    if (!files || files.length === 0) {
+      return console.error("❌ No files in manifest");
+    }
 
-    if (!files || files.length === 0) return console.error("❌ No files in manifest");
+    console.log("📦 Manifest fetched:", files);
 
     const player = createAudioPlayer();
     let index = 0;
 
     const playNext = () => {
-      const filename = files[index];
-      const url = `${BASE_URL}/${filename}`;
+      const file = files[index];
+      const url = `${BASE_AUDIO_URL}${file}`;
       console.log("🎧 Now playing:", url);
       const resource = createAudioResource(url);
       player.play(resource);
@@ -46,7 +61,8 @@ client.once('ready', async () => {
     };
 
     player.on(AudioPlayerStatus.Idle, playNext);
-    player.on("error", err => console.error("Audio error:", err.message));
+    player.on("error", (err) => console.error("Audio error:", err.message));
+
     connection.subscribe(player);
     playNext();
   } catch (err) {

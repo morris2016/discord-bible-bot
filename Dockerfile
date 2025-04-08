@@ -1,7 +1,7 @@
-# Use official Node.js LTS image
+# Use official Node.js image
 FROM node:18
 
-# Install required system dependencies
+# Install necessary OS packages
 RUN apt-get update && \
     apt-get install -y ffmpeg libsodium-dev && \
     apt-get clean
@@ -9,13 +9,12 @@ RUN apt-get update && \
 # Set working directory
 WORKDIR /app
 
-# Copy package files and install dependencies
+# Copy dependencies and install
 COPY package*.json ./
 RUN npm install
 
-# Copy the rest of the project files
+# Copy remaining files
 COPY . .
 
-# Start the bot
+# Run the bot
 CMD ["node", "index.js"]
-# Triggering rebuild - April 8
