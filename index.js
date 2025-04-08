@@ -52,35 +52,35 @@ client.once('ready', async () => {
     const playNext = () => {
       const url = `https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/${files[index]}`;
       console.log("🎧 Now playing:", url);
-
-      const ffmpeg = spawn('ffmpeg', [
-        '-re',
+    
+      const ffmpeg = spawn(require('ffmpeg-static'), [
         '-i', url,
-        '-analyzeduration', '0',
-        '-loglevel', 'error',
         '-f', 's16le',
         '-ar', '48000',
         '-ac', '2',
-        'pipe:1',
-      ]);
-
-      ffmpeg.stderr.on('data', (data) => {
-        console.error(`FFmpeg stderr: ${data}`);
+        'pipe:1'
+      ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    
+      ffmpeg.stderr.on('data', data => {
+        console.error(`FFmpeg error: ${data}`);
       });
-
-      ffmpeg.on('close', (code) => {
-        console.log(`FFmpeg process exited with code ${code}`);
+    
+      ffmpeg.on('close', code => {
+        console.log(`FFmpeg exited with code ${code}`);
+        // Prevent jumping to next if error occurs early
+        if (code !== 0 && player.state.status === AudioPlayerStatus.Playing) {
+          console.warn("Skipping to next due to FFmpeg error");
+          playNext();
+        }
       });
-
-      const stream = ffmpeg.stdout;
-
-      const resource = createAudioResource(stream, {
+    
+      const resource = createAudioResource(ffmpeg.stdout, {
         inputType: StreamType.Raw,
       });
-
+    
       player.play(resource);
       index = (index + 1) % files.length;
-    };
+    };    
 
     player.on(AudioPlayerStatus.Idle, playNext);
     player.on("error", err => console.error("Audio error:", err.message));
