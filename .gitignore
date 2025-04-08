@@ -1,9 +1,9 @@
 node_modules/
 .env
-# Ignore everything in public_audio...
+# Ignore all files in public_audio...
 public_audio/*
 
-# ...except this specific file
-!public_audio/.keep
+# ...but allow .mp3 files
+!public_audio/*.mp3
 
- 
+
