@@ -1,19 +1,13 @@
-require("dotenv").config();
+require("libsodium-wrappers").ready;
 const { Client, GatewayIntentBits } = require("discord.js");
 const {
   joinVoiceChannel,
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
-  StreamType,
 } = require("@discordjs/voice");
-
 const fetch = require("node-fetch");
-const ffmpeg = require("ffmpeg-static");
-const { spawn } = require("child_process");
-
-// ⏱️ Optional: Needed if you want sodium to work everywhere
-require("libsodium-wrappers").ready;
+require("dotenv").config();
 
 console.log("🚀 Bot is starting...");
 
@@ -23,13 +17,15 @@ const client = new Client({
 
 const CHANNEL_ID = process.env.CHANNEL_ID;
 const MANIFEST_URL = process.env.MANIFEST_URL;
-const AUDIO_BASE = process.env.AUDIO_BASE; // Ends with /
+const AUDIO_BASE = process.env.AUDIO_BASE;
 
 console.log("📛 TOKEN:", process.env.TOKEN ? "Found" : "Missing");
 console.log("🎧 CHANNEL_ID:", CHANNEL_ID ? "Found" : "Missing");
+console.log("📦 MANIFEST_URL:", MANIFEST_URL || "❌ Not Set");
+console.log("🔗 AUDIO_BASE:", AUDIO_BASE || "❌ Not Set");
 
 client.once("ready", async () => {
-  console.log(`✅ Logged in as ${client.user.tag}`);
+  console.log("✅ Logged in as " + client.user.tag);
 
   const voiceChannel = client.channels.cache.get(CHANNEL_ID);
   if (!voiceChannel || voiceChannel.type !== 2) {
@@ -45,35 +41,24 @@ client.once("ready", async () => {
   try {
     const res = await fetch(MANIFEST_URL);
     const manifest = await res.json();
-    const files = manifest.files;
 
-    if (!files || files.length === 0) {
+    const files = manifest.files || manifest;
+    if (!files || !Array.isArray(files) || files.length === 0) {
       return console.error("❌ No files in manifest");
     }
 
-    console.log("📦 Manifest fetched:", files);
+    console.log("📦 Manifest fetched:", files.slice(0, 10), "...");
 
     const player = createAudioPlayer();
     let index = 0;
 
     const playNext = () => {
-      const url = `${AUDIO_BASE}${files[index]}`;
-      console.log("🎧 Now playing:", url);
+      const filename = files[index];
+      const audioUrl = AUDIO_BASE + filename;
+      console.log("🎧 Now playing:", audioUrl);
 
-      const ffmpegProcess = spawn(ffmpeg, [
-        "-reconnect", "1",
-        "-reconnect_streamed", "1",
-        "-reconnect_delay_max", "5",
-        "-i", url,
-        "-analyzeduration", "0",
-        "-loglevel", "error",
-        "-f", "s16le",
-        "-ar", "48000",
-        "-ac", "2"
-      ], { stdio: ["pipe", "pipe", "inherit"] });
-
-      const resource = createAudioResource(ffmpegProcess.stdout, {
-        inputType: StreamType.Raw,
+      const resource = createAudioResource(audioUrl, {
+        inlineVolume: false,
       });
 
       player.play(resource);
@@ -81,13 +66,12 @@ client.once("ready", async () => {
     };
 
     player.on(AudioPlayerStatus.Idle, () => {
-      console.log("⏭️ Track ended, playing next...");
-      playNext();
+      setTimeout(playNext, 500); // slight delay to prevent overlap
     });
 
-    player.on("error", (error) => {
-      console.error("⚠️ Audio error:", error.message);
-      playNext(); // Skip to next on error
+    player.on("error", (err) => {
+      console.error("⚠️ FFmpeg error:", err.message);
+      setTimeout(playNext, 1000); // skip to next
     });
 
     connection.subscribe(player);
