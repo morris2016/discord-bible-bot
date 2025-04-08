@@ -1,5 +1,10 @@
-# Use official Node.js image
+# Use official Node.js LTS image
 FROM node:18
+
+# Install required system dependencies
+RUN apt-get update && \
+    apt-get install -y ffmpeg libsodium-dev && \
+    apt-get clean
 
 # Set working directory
 WORKDIR /app
@@ -8,12 +13,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm install
 
-# Install system dependencies for Discord voice
-RUN apt-get update && \
-    apt-get install -y ffmpeg libsodium-dev && \
-    apt-get clean
-
-# Copy all remaining app files
+# Copy the rest of the project files
 COPY . .
 
 # Start the bot
