@@ -4,19 +4,15 @@ FROM node:18
 # Set working directory inside container
 WORKDIR /app
 
-# Copy dependency files first and install (for better caching)
+# Copy dependency files first and install
 COPY package*.json ./
 RUN npm install
 
-# Copy all source files including audio
+# FORCE REBUILD: change something below to invalidate cache
+# Dummy change 2025-04-08
 COPY . .
 
-# Optional: debug - list contents of public_audio during build
+# Debug: ensure files are copied
 RUN ls -l /app/public_audio || echo "⚠️ public_audio folder not found"
 
-# Set environment variables if needed (optional; Railway uses its own ENV system)
-# ENV TOKEN=your_token_here
-# ENV CHANNEL_ID=your_channel_id_here
-
-# Start the bot
 CMD ["node", "index.js"]
