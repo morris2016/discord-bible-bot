@@ -1,35 +1,34 @@
-const { Client, GatewayIntentBits } = require('discord.js');
+require("libsodium-wrappers").ready;
+const { Client, GatewayIntentBits } = require("discord.js");
 const {
   joinVoiceChannel,
   createAudioPlayer,
   createAudioResource,
   AudioPlayerStatus,
   StreamType,
-} = require('@discordjs/voice');
-require('libsodium-wrappers'); // Required for encryption
-const { spawn } = require('child_process');
-const fetch = require('node-fetch');
-require('dotenv').config();
+} = require("@discordjs/voice");
+const fetch = require("node-fetch");
+const prism = require("prism-media");
+const ffmpeg = require("ffmpeg-static");
+require("dotenv").config();
 
 console.log("🚀 Bot is starting...");
-
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
 
 const CHANNEL_ID = process.env.CHANNEL_ID;
-const MANIFEST_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json";
+const MANIFEST_URL = process.env.MANIFEST_URL || "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json";
+const AUDIO_BASE = process.env.AUDIO_BASE || "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/";
 
 console.log("📛 TOKEN:", process.env.TOKEN ? "Found" : "Missing");
 console.log("🎧 CHANNEL_ID:", CHANNEL_ID ? "Found" : "Missing");
 
-client.once('ready', async () => {
+client.once("ready", async () => {
   console.log("✅ Logged in as " + client.user.tag);
 
   const voiceChannel = client.channels.cache.get(CHANNEL_ID);
-  if (!voiceChannel || voiceChannel.type !== 2) {
-    return console.error("❌ Invalid or missing voice channel.");
-  }
+  if (!voiceChannel || voiceChannel.type !== 2) return console.error("❌ Invalid or missing voice channel.");
 
   const connection = joinVoiceChannel({
     channelId: voiceChannel.id,
@@ -40,54 +39,49 @@ client.once('ready', async () => {
   try {
     const res = await fetch(MANIFEST_URL);
     const manifest = await res.json();
-    const files = manifest.files;
+    const files = manifest.files || manifest;
 
     if (!files || files.length === 0) return console.error("❌ No files in manifest");
 
     console.log("📦 Manifest fetched:", files);
-
     const player = createAudioPlayer();
     let index = 0;
 
     const playNext = () => {
-      const url = `https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/${files[index]}`;
+      const url = `${AUDIO_BASE}${files[index]}`;
       console.log("🎧 Now playing:", url);
-    
-      const ffmpeg = spawn(require('ffmpeg-static'), [
-        '-i', url,
-        '-f', 's16le',
-        '-ar', '48000',
-        '-ac', '2',
-        'pipe:1'
-      ], { stdio: ['ignore', 'pipe', 'pipe'] });
-    
-      ffmpeg.stderr.on('data', data => {
-        console.error(`FFmpeg error: ${data}`);
+
+      const stream = new prism.FFmpeg({
+        args: [
+          "-reconnect", "1",
+          "-reconnect_streamed", "1",
+          "-reconnect_delay_max", "5",
+          "-i", url,
+          "-analyzeduration", "0",
+          "-loglevel", "0",
+          "-f", "s16le",
+          "-ar", "48000",
+          "-ac", "2",
+        ],
+        executable: ffmpeg,
       });
-    
-      ffmpeg.on('close', code => {
-        console.log(`FFmpeg exited with code ${code}`);
-        // Prevent jumping to next if error occurs early
-        if (code !== 0 && player.state.status === AudioPlayerStatus.Playing) {
-          console.warn("Skipping to next due to FFmpeg error");
-          playNext();
-        }
-      });
-    
-      const resource = createAudioResource(ffmpeg.stdout, {
+
+      const resource = createAudioResource(stream, {
         inputType: StreamType.Raw,
       });
-    
+
       player.play(resource);
       index = (index + 1) % files.length;
-    };    
+    };
 
     player.on(AudioPlayerStatus.Idle, playNext);
-    player.on("error", err => console.error("Audio error:", err.message));
+    player.on("error", (err) => {
+      console.error("Audio error:", err.message);
+      playNext(); // Skip on error
+    });
 
     connection.subscribe(player);
     playNext();
-
   } catch (err) {
     console.error("❌ Failed to fetch or parse manifest:", err.message);
   }
