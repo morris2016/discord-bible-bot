@@ -10,6 +10,8 @@ RUN npm install
 
 # Copy all source files
 COPY . .
+RUN rm -rf node_modules && npm install
+
 
 # Start the bot
 CMD ["node", "index.js"]
