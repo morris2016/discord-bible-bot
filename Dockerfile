@@ -1,19 +1,20 @@
+# Use official Node.js image
 FROM node:18
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-  libsodium-dev \
-  && apt-get clean
+# Install necessary OS packages
+RUN apt-get update && \
+    apt-get install -y ffmpeg libsodium-dev && \
+    apt-get clean
 
-# Set work directory
+# Set working directory
 WORKDIR /app
 
 # Copy dependencies and install
 COPY package*.json ./
 RUN npm install
 
-# Copy app source
+# Copy remaining files
 COPY . .
 
-# Start bot
+# Run the bot
 CMD ["node", "index.js"]
