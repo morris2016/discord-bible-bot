@@ -1,11 +1,2 @@
-node_modules/
+node_modules
 .env
-
-# Ignore everything in public_audio...
-public_audio/*
-
-# ...except this specific file
-!public_audio/.keep
-!public_audio/B01___01_Matthew_____ENGNKJN1DA.mp3
-
-

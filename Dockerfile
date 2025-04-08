@@ -4,15 +4,12 @@ FROM node:18
 # Set working directory inside container
 WORKDIR /app
 
-# Copy dependency files first and install
+# Copy dependency files first and install (for better caching)
 COPY package*.json ./
 RUN npm install
 
-# FORCE REBUILD: change something below to invalidate cache
-# Dummy change 2025-04-08
+# Copy all source files
 COPY . .
 
-# Debug: ensure files are copied
-RUN ls -l /app/public_audio || echo "⚠️ public_audio folder not found"
-
+# Start the bot
 CMD ["node", "index.js"]
