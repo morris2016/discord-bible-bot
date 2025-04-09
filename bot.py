@@ -70,13 +70,11 @@ async def play_entry(interaction, index):
         user_vc = interaction.user.voice.channel
         vcid = user_vc.id
 
-        # Connect or reuse existing VC
-        if user_vc.guild.voice_client and user_vc.guild.voice_client.channel.id == vcid:
-            vc = user_vc.guild.voice_client
-        else:
+        vc = voice_clients.get(vcid)
+        if not vc or not vc.is_connected():
             vc = await user_vc.connect()
+            voice_clients[vcid] = vc
 
-        voice_clients[vcid] = vc
         playback_index[vcid] = index
         playback_contexts[vcid] = interaction
 
@@ -84,11 +82,15 @@ async def play_entry(interaction, index):
             vc.stop()
 
         vc.play(FFmpegPCMAudio(entry['url']))
-        await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
+        try:
+            await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
+
     except Exception as e:
         try:
             await interaction.response.send_message(f"❌ Failed to play: {e}", ephemeral=True)
-        except:
+        except discord.errors.InteractionResponded:
             await interaction.followup.send(f"❌ Failed to play: {e}", ephemeral=True)
 
 # -------- AUTOCOMPLETE --------
@@ -244,7 +246,7 @@ async def playback_watcher():
                         await interaction.channel.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
                 except Exception as e:
                     print(f"Error autoplay: {e}")
-                    
+
 # -------- START --------
 if __name__ == "__main__":
     TOKEN = os.getenv("BOT_TOKEN")
