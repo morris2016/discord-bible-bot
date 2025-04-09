@@ -151,7 +151,7 @@ async def next_chapter(interaction: discord.Interaction):
     if curr < len(manifest_data):
         await play_entry(interaction, curr)
     else:
-     await interaction.followup.send(...)
+     await interaction.followup.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
 
 @tree.command(name="prev", description="Play previous chapter")
 async def prev_chapter(interaction: discord.Interaction):
