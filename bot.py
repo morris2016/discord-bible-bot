@@ -6,8 +6,7 @@ import asyncio
 import json
 import random
 import os
-
-import time  # Add this with your imports if not already present
+import time
 
 class SafeAudio(FFmpegPCMAudio):
     def __init__(self, source_url):
@@ -16,7 +15,6 @@ class SafeAudio(FFmpegPCMAudio):
 
     def elapsed(self):
         return time.time() - self.start_time
-
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -31,8 +29,8 @@ manifest_data = []
 playback_index = {}
 voice_clients = {}
 playback_contexts = {}
-bookmarks = {}  # user_id: (book, chapter)
-settings_store = {}  # guild_id: {"voice_channel_id": int, "devotion_hour": int}
+bookmarks = {}
+settings_store = {}
 
 SAVE_FILE = "resume_state.json"
 if os.path.exists(SAVE_FILE):
@@ -52,8 +50,6 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await fetch_manifest()
     await tree.sync()
-    #playback_watcher.start()
-    #daily_devotion.start()
 
 # -------- MANIFEST LOADER --------
 async def fetch_manifest():
@@ -75,43 +71,35 @@ def get_index(book: str, chapter: int):
             return i
     return None
 
-
 async def handle_after_playback(error, vcid, source):
     if error:
         print(f"Playback error: {error}")
         return
 
-    # Safety buffer to wait before autoplay
-    remaining_buffer = max(1.5, 10 - source.elapsed())  # waits 10s if audio was <10s
-    await asyncio.sleep(remaining_buffer)
+    await asyncio.sleep(max(1.5, 10 - source.elapsed()))
 
     next_index = playback_index.get(vcid, -1) + 1
     if 0 <= next_index < len(manifest_data):
         playback_index[vcid] = next_index
         next_entry = manifest_data[next_index]
-
         try:
             vc = voice_clients[vcid]
             new_source = SafeAudio(next_entry['url'])
             vc.play(new_source, after=lambda e: asyncio.run_coroutine_threadsafe(
                 handle_after_playback(e, vcid, new_source), bot.loop
             ))
-
             ctx = playback_contexts.get(vcid)
             if ctx:
                 await ctx.channel.send(f"▶️ Now playing: {next_entry['book']} {next_entry['chapter']}")
         except Exception as e:
             print(f"Error autoplaying next: {e}")
 
-
-# --- MODIFIED play_entry with after callback ---
 async def play_entry(interaction, index):
     try:
         entry = manifest_data[index]
         user_vc = interaction.user.voice.channel
         vcid = user_vc.id
 
-        # If the bot is already connected to the same VC, reuse it
         if vcid in voice_clients and voice_clients[vcid].is_connected():
             vc = voice_clients[vcid]
         else:
@@ -124,23 +112,20 @@ async def play_entry(interaction, index):
         if vc.is_playing():
             vc.stop()
 
-        def after_playback(error):
-    if error:
-        print(f"Playback error: {error}")
-        return
+        source = SafeAudio(entry['url'])
+        vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(
+            handle_after_playback(e, vcid, source), bot.loop
+        ))
 
-    next_index = playback_index.get(vcid, -1) + 1
-    if 0 <= next_index < len(manifest_data):
-        playback_index[vcid] = next_index
-        next_entry = manifest_data[next_index]
-
-        # Check if still connected
-        if vc.is_connected():
-            vc.play(FFmpegPCMAudio(next_entry['url']), after=after_playback)
-            coro = interaction.followup.send(f"🎧 Auto-playing: {next_entry['book']} {next_entry['chapter']}")
-            asyncio.run_coroutine_threadsafe(coro, bot.loop)
-        else:
-            print("❌ Skipping autoplay: bot is no longer connected to voice.")
+        try:
+            await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
+    except Exception as e:
+        try:
+            await interaction.response.send_message(f"❌ Failed to play: {e}", ephemeral=True)
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send(f"❌ Failed to play: {e}", ephemeral=True)
 
 # -------- AUTOCOMPLETE --------
 async def book_autocomplete(interaction: discord.Interaction, current: str):
@@ -158,15 +143,13 @@ async def chapter_autocomplete(interaction: discord.Interaction, current: str):
 @app_commands.describe(book="Book name", chapter="Chapter number")
 @app_commands.autocomplete(book=book_autocomplete, chapter=chapter_autocomplete)
 async def play(interaction: discord.Interaction, book: str, chapter: int):
-    await interaction.response.defer(ephemeral=False)  # 👈 This prevents the timeout
-
+    await interaction.response.defer(ephemeral=False)
     await fetch_manifest()
     index = get_index(book, chapter)
     if index is None:
         await interaction.followup.send("❌ Chapter not found in manifest.", ephemeral=True)
     else:
         await play_entry(interaction, index)
-
 
 @tree.command(name="pause", description="Pause playback")
 async def pause(interaction: discord.Interaction):
@@ -203,12 +186,12 @@ async def next_chapter(interaction: discord.Interaction):
     if curr < len(manifest_data):
         await play_entry(interaction, curr)
     else:
-     await interaction.followup.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
+        await interaction.followup.send("🚫 No more chapters.", ephemeral=True)
 
 @tree.command(name="prev", description="Play previous chapter")
 async def prev_chapter(interaction: discord.Interaction):
     vcid = interaction.user.voice.channel.id
-    curr = max(0, playback_index.get(gid, 1) - 1)
+    curr = max(0, playback_index.get(vcid, 1) - 1)
     await play_entry(interaction, curr)
 
 @tree.command(name="bookmark", description="Bookmark current chapter")
@@ -254,7 +237,6 @@ async def devotion(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("❌ Failed to locate a chapter for devotion.", ephemeral=True)
 
-
 @tree.command(name="books", description="List Bible books")
 async def books(interaction: discord.Interaction, testament: str = None):
     old_books = ["Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy", "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings", "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job", "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon", "Isaiah", "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel", "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah", "Haggai", "Zechariah", "Malachi"]
@@ -278,7 +260,6 @@ async def settings(interaction: discord.Interaction, voice_channel: discord.Voic
     if devotion_hour is not None:
         msg.append(f"• Devotion Hour: {devotion_hour}:00")
     await interaction.response.send_message("\n".join(msg))
-
 
 # -------- START --------
 if __name__ == "__main__":
