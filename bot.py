@@ -67,28 +67,24 @@ def get_index(book: str, chapter: int):
 async def play_entry(interaction, index):
     try:
         entry = manifest_data[index]
-        gid = interaction.guild_id
+        user_vc = interaction.user.voice.channel
+        vcid = user_vc.id
         vc = interaction.guild.voice_client
 
-        if not vc:
-            if interaction.user.voice:
-                vc = await interaction.user.voice.channel.connect()
-            else:
-                await interaction.followup.send("❌ You must be in a voice channel.", ephemeral=True)
-                return
+        if not vc or vc.channel.id != vcid:
+            vc = await user_vc.connect()
 
-        voice_clients[gid] = vc
-        playback_index[gid] = index
-        playback_contexts[gid] = interaction
+        voice_clients[vcid] = vc
+        playback_index[vcid] = index
+        playback_contexts[vcid] = interaction
 
         if vc.is_playing():
             vc.stop()
 
         vc.play(FFmpegPCMAudio(entry['url']))
-        await interaction.followup.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
-
+        await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
     except Exception as e:
-        await interaction.followup.send(f"❌ Failed to play: {e}", ephemeral=True)
+        await interaction.response.send_message(f"❌ Failed to play: {e}", ephemeral=True)
 
 
 # -------- AUTOCOMPLETE --------
@@ -156,7 +152,7 @@ async def next_chapter(interaction: discord.Interaction):
 
 @tree.command(name="prev", description="Play previous chapter")
 async def prev_chapter(interaction: discord.Interaction):
-    gid = interaction.guild_id
+    vcid = interaction.user.voice.channel.id
     curr = max(0, playback_index.get(gid, 1) - 1)
     await play_entry(interaction, curr)
 
@@ -237,22 +233,20 @@ async def daily_devotion():
 
 @tasks.loop(seconds=5)
 async def playback_watcher():
-    for gid, vc in voice_clients.items():
+    for vcid, vc in voice_clients.items():
         if vc and not vc.is_playing() and not vc.is_paused():
-            index = playback_index.get(gid, -1) + 1
+            index = playback_index.get(vcid, -1) + 1
             if 0 <= index < len(manifest_data):
-                playback_index[gid] = index
-                interaction = playback_contexts.get(gid)
+                playback_index[vcid] = index
+                interaction = playback_contexts.get(vcid)
                 entry = manifest_data[index]
                 try:
                     vc.play(FFmpegPCMAudio(entry['url']))
-                    print(f"🎧 Auto-play: {entry['book']} {entry['chapter']}")
-                    
-                    # ✅ Send to the same channel as the previous interaction
                     if interaction:
                         await interaction.channel.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
                 except Exception as e:
                     print(f"Error autoplay: {e}")
+
 
 # -------- START --------
 if __name__ == "__main__":
