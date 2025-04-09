@@ -64,6 +64,7 @@ def get_index(book: str, chapter: int):
             return i
     return None
 
+# --- MODIFIED play_entry with after callback ---
 async def play_entry(interaction, index):
     try:
         entry = manifest_data[index]
@@ -74,7 +75,6 @@ async def play_entry(interaction, index):
         if vcid in voice_clients and voice_clients[vcid].is_connected():
             vc = voice_clients[vcid]
         else:
-            # If already connected to another VC in the same guild, create a new connection to this one
             vc = await user_vc.connect()
             voice_clients[vcid] = vc
 
@@ -84,7 +84,22 @@ async def play_entry(interaction, index):
         if vc.is_playing():
             vc.stop()
 
-        vc.play(FFmpegPCMAudio(entry['url']))
+        def after_playback(error):
+            if error:
+                print(f"Playback error: {error}")
+                return
+
+            next_index = playback_index.get(vcid, -1) + 1
+            if 0 <= next_index < len(manifest_data):
+                playback_index[vcid] = next_index
+                next_entry = manifest_data[next_index]
+                coro = vc.play(FFmpegPCMAudio(next_entry['url']), after=after_playback)
+                asyncio.run_coroutine_threadsafe(
+                    interaction.channel.send(f"▶️ Now playing: {next_entry['book']} {next_entry['chapter']}"),
+                    bot.loop
+                )
+
+        vc.play(FFmpegPCMAudio(entry['url']), after=after_playback)
 
         try:
             await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
@@ -234,22 +249,6 @@ async def settings(interaction: discord.Interaction, voice_channel: discord.Voic
         msg.append(f"• Devotion Hour: {devotion_hour}:00")
     await interaction.response.send_message("\n".join(msg))
 
-# -------- TASKS --------
-@tasks.loop(seconds=5)
-async def playback_watcher():
-    for vcid, vc in voice_clients.items():
-        if vc and not vc.is_playing() and not vc.is_paused():
-            index = playback_index.get(vcid, -1) + 1
-            if 0 <= index < len(manifest_data):
-                playback_index[vcid] = index
-                interaction = playback_contexts.get(vcid)
-                entry = manifest_data[index]
-                try:
-                    vc.play(FFmpegPCMAudio(entry['url']))
-                    if interaction:
-                        await interaction.channel.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
-                except Exception as e:
-                    print(f"Error autoplay: {e}")
 
 # -------- START --------
 if __name__ == "__main__":
