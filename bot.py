@@ -10,11 +10,14 @@ import time
 
 class SafeAudio(FFmpegPCMAudio):
     def __init__(self, source_url):
-        super().__init__(source_url)
+        before_opts = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -timeout 10000000"
+        options = "-vn -af apad=pad_dur=2"
+        super().__init__(source_url, before_options=before_opts, options=options)
         self.start_time = time.time()
 
     def elapsed(self):
         return time.time() - self.start_time
+
 
 intents = discord.Intents.default()
 intents.message_content = True
