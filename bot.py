@@ -232,13 +232,16 @@ async def search(interaction: discord.Interaction, keyword: str):
 
 @tree.command(name="devotion", description="Play a random Bible chapter")
 async def devotion(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=False)  # ✅ Acknowledge instantly
+
     await fetch_manifest()
     chapter = random.choice(manifest_data)
     index = get_index(chapter['book'], chapter['chapter'])
+
     if index is not None:
         await play_entry(interaction, index)
     else:
-        await interaction.response.send_message("❌ Failed to locate a chapter for devotion.", ephemeral=True)
+        await interaction.followup.send("❌ Failed to locate a chapter for devotion.", ephemeral=True)
 
 @tree.command(name="books", description="List Bible books")
 async def books(interaction: discord.Interaction, testament: str = None):
