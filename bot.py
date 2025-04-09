@@ -69,9 +69,11 @@ async def play_entry(interaction, index):
         entry = manifest_data[index]
         user_vc = interaction.user.voice.channel
         vcid = user_vc.id
-        vc = interaction.guild.voice_client
 
-        if not vc or vc.channel.id != vcid:
+        # Connect or reuse existing VC
+        if user_vc.guild.voice_client and user_vc.guild.voice_client.channel.id == vcid:
+            vc = user_vc.guild.voice_client
+        else:
             vc = await user_vc.connect()
 
         voice_clients[vcid] = vc
@@ -84,8 +86,10 @@ async def play_entry(interaction, index):
         vc.play(FFmpegPCMAudio(entry['url']))
         await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
     except Exception as e:
-        await interaction.response.send_message(f"❌ Failed to play: {e}", ephemeral=True)
-
+        try:
+            await interaction.response.send_message(f"❌ Failed to play: {e}", ephemeral=True)
+        except:
+            await interaction.followup.send(f"❌ Failed to play: {e}", ephemeral=True)
 
 # -------- AUTOCOMPLETE --------
 async def book_autocomplete(interaction: discord.Interaction, current: str):
@@ -225,12 +229,6 @@ async def settings(interaction: discord.Interaction, voice_channel: discord.Voic
     await interaction.response.send_message("\n".join(msg))
 
 # -------- TASKS --------
-@tasks.loop(hours=24)
-async def daily_devotion():
-    if manifest_data:
-        chapter = random.choice(manifest_data)
-        print(f"📖 Daily devotion: {chapter['book']} {chapter['chapter']}")
-
 @tasks.loop(seconds=5)
 async def playback_watcher():
     for vcid, vc in voice_clients.items():
@@ -246,8 +244,7 @@ async def playback_watcher():
                         await interaction.channel.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
                 except Exception as e:
                     print(f"Error autoplay: {e}")
-
-
+                    
 # -------- START --------
 if __name__ == "__main__":
     TOKEN = os.getenv("BOT_TOKEN")
