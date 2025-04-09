@@ -52,8 +52,8 @@ async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await fetch_manifest()
     await tree.sync()
-    playback_watcher.start()
-    daily_devotion.start()
+    #playback_watcher.start()
+    #daily_devotion.start()
 
 # -------- MANIFEST LOADER --------
 async def fetch_manifest():
@@ -125,36 +125,22 @@ async def play_entry(interaction, index):
             vc.stop()
 
         def after_playback(error):
-            if error:
-                print(f"Playback error: {error}")
-                return
+    if error:
+        print(f"Playback error: {error}")
+        return
 
-            next_index = playback_index.get(vcid, -1) + 1
-            if 0 <= next_index < len(manifest_data):
-                playback_index[vcid] = next_index
-                next_entry = manifest_data[next_index]
-                coro = vc.play(FFmpegPCMAudio(next_entry['url']), after=after_playback)
-                asyncio.run_coroutine_threadsafe(
-                    interaction.channel.send(f"▶️ Now playing: {next_entry['book']} {next_entry['chapter']}"),
-                    bot.loop
-                )
+    next_index = playback_index.get(vcid, -1) + 1
+    if 0 <= next_index < len(manifest_data):
+        playback_index[vcid] = next_index
+        next_entry = manifest_data[next_index]
 
-        source = SafeAudio(entry['url'])
-        vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(
-    handle_after_playback(e, vcid, source), bot.loop
-))
-
-
-        try:
-            await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
-        except discord.errors.InteractionResponded:
-            await interaction.followup.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
-
-    except Exception as e:
-        try:
-            await interaction.response.send_message(f"❌ Failed to play: {e}", ephemeral=True)
-        except discord.errors.InteractionResponded:
-            await interaction.followup.send(f"❌ Failed to play: {e}", ephemeral=True)
+        # Check if still connected
+        if vc.is_connected():
+            vc.play(FFmpegPCMAudio(next_entry['url']), after=after_playback)
+            coro = interaction.followup.send(f"🎧 Auto-playing: {next_entry['book']} {next_entry['chapter']}")
+            asyncio.run_coroutine_threadsafe(coro, bot.loop)
+        else:
+            print("❌ Skipping autoplay: bot is no longer connected to voice.")
 
 # -------- AUTOCOMPLETE --------
 async def book_autocomplete(interaction: discord.Interaction, current: str):
