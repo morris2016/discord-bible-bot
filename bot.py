@@ -7,6 +7,17 @@ import json
 import random
 import os
 
+import time  # Add this with your imports if not already present
+
+class SafeAudio(FFmpegPCMAudio):
+    def __init__(self, source_url):
+        super().__init__(source_url)
+        self.start_time = time.time()
+
+    def elapsed(self):
+        return time.time() - self.start_time
+
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.guilds = True
@@ -64,6 +75,35 @@ def get_index(book: str, chapter: int):
             return i
     return None
 
+
+async def handle_after_playback(error, vcid, source):
+    if error:
+        print(f"Playback error: {error}")
+        return
+
+    # Safety buffer to wait before autoplay
+    remaining_buffer = max(1.5, 10 - source.elapsed())  # waits 10s if audio was <10s
+    await asyncio.sleep(remaining_buffer)
+
+    next_index = playback_index.get(vcid, -1) + 1
+    if 0 <= next_index < len(manifest_data):
+        playback_index[vcid] = next_index
+        next_entry = manifest_data[next_index]
+
+        try:
+            vc = voice_clients[vcid]
+            new_source = SafeAudio(next_entry['url'])
+            vc.play(new_source, after=lambda e: asyncio.run_coroutine_threadsafe(
+                handle_after_playback(e, vcid, new_source), bot.loop
+            ))
+
+            ctx = playback_contexts.get(vcid)
+            if ctx:
+                await ctx.channel.send(f"▶️ Now playing: {next_entry['book']} {next_entry['chapter']}")
+        except Exception as e:
+            print(f"Error autoplaying next: {e}")
+
+
 # --- MODIFIED play_entry with after callback ---
 async def play_entry(interaction, index):
     try:
@@ -99,7 +139,11 @@ async def play_entry(interaction, index):
                     bot.loop
                 )
 
-        vc.play(FFmpegPCMAudio(entry['url']), after=after_playback)
+        source = SafeAudio(entry['url'])
+        vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(
+    handle_after_playback(e, vcid, source), bot.loop
+))
+
 
         try:
             await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
