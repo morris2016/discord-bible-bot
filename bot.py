@@ -106,12 +106,15 @@ async def chapter_autocomplete(interaction: discord.Interaction, current: str):
 @app_commands.describe(book="Book name", chapter="Chapter number")
 @app_commands.autocomplete(book=book_autocomplete, chapter=chapter_autocomplete)
 async def play(interaction: discord.Interaction, book: str, chapter: int):
+    await interaction.response.defer(ephemeral=False)  # 👈 This prevents the timeout
+
     await fetch_manifest()
     index = get_index(book, chapter)
     if index is None:
-        await interaction.response.send_message("❌ Chapter not found in manifest.", ephemeral=True)
+        await interaction.followup.send("❌ Chapter not found in manifest.", ephemeral=True)
     else:
         await play_entry(interaction, index)
+
 
 @tree.command(name="pause", description="Pause playback")
 async def pause(interaction: discord.Interaction):
