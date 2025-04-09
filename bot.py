@@ -248,4 +248,8 @@ async def playback_watcher():
                         print(f"Error autoplay: {e}")
 
 # -------- START --------
-bot.run(os.getenv("BOT_TOKEN"))
+if __name__ == "__main__":
+    TOKEN = os.getenv("BOT_TOKEN")
+    if not TOKEN:
+        raise EnvironmentError("❌ BOT_TOKEN not set in environment variables.")
+    bot.run(TOKEN)
