@@ -70,8 +70,11 @@ async def play_entry(interaction, index):
         user_vc = interaction.user.voice.channel
         vcid = user_vc.id
 
-        vc = voice_clients.get(vcid)
-        if not vc or not vc.is_connected():
+        # If the bot is already connected to the same VC, reuse it
+        if vcid in voice_clients and voice_clients[vcid].is_connected():
+            vc = voice_clients[vcid]
+        else:
+            # If already connected to another VC in the same guild, create a new connection to this one
             vc = await user_vc.connect()
             voice_clients[vcid] = vc
 
@@ -82,6 +85,7 @@ async def play_entry(interaction, index):
             vc.stop()
 
         vc.play(FFmpegPCMAudio(entry['url']))
+
         try:
             await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
         except discord.errors.InteractionResponded:
