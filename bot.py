@@ -242,14 +242,17 @@ async def playback_watcher():
             index = playback_index.get(gid, -1) + 1
             if 0 <= index < len(manifest_data):
                 playback_index[gid] = index
-                ctx = playback_contexts.get(gid)
-                if ctx:
-                    entry = manifest_data[index]
-                    try:
-                        vc.play(FFmpegPCMAudio(entry['url']))
-                        print(f"🎧 Auto-play: {entry['book']} {entry['chapter']}")
-                    except Exception as e:
-                        print(f"Error autoplay: {e}")
+                interaction = playback_contexts.get(gid)
+                entry = manifest_data[index]
+                try:
+                    vc.play(FFmpegPCMAudio(entry['url']))
+                    print(f"🎧 Auto-play: {entry['book']} {entry['chapter']}")
+                    
+                    # ✅ Send to the same channel as the previous interaction
+                    if interaction:
+                        await interaction.channel.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
+                except Exception as e:
+                    print(f"Error autoplay: {e}")
 
 # -------- START --------
 if __name__ == "__main__":
