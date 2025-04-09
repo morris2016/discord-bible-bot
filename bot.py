@@ -74,7 +74,7 @@ async def play_entry(interaction, index):
             if interaction.user.voice:
                 vc = await interaction.user.voice.channel.connect()
             else:
-                await interaction.response.send_message("❌ You must be in a voice channel.", ephemeral=True)
+                await interaction.followup.send("❌ You must be in a voice channel.", ephemeral=True)
                 return
 
         voice_clients[gid] = vc
@@ -85,10 +85,11 @@ async def play_entry(interaction, index):
             vc.stop()
 
         vc.play(FFmpegPCMAudio(entry['url']))
-        await interaction.response.send_message(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
+        await interaction.followup.send(f"▶️ Now playing: {entry['book']} {entry['chapter']}")
 
     except Exception as e:
-        await interaction.response.send_message(f"❌ Failed to play: {e}", ephemeral=True)
+        await interaction.followup.send(f"❌ Failed to play: {e}", ephemeral=True)
+
 
 # -------- AUTOCOMPLETE --------
 async def book_autocomplete(interaction: discord.Interaction, current: str):
