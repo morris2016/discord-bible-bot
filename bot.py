@@ -293,6 +293,5 @@ async def on_ready():
     await fetch_manifest()
 
 
-# 🔑 Run the bot (Insert your token here)
-import os
-bot.run(os.getenv("TOKEN_ID"))
+# -------- START --------
+bot.run(os.getenv("BOT_TOKEN"))  # ✅ matches Railway secret name
