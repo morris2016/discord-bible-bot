@@ -282,7 +282,7 @@ async def send_panel(channel):
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
-    await fetch_manifest()
+    await fetch_manifest() #
 
 # === LAUNCH BOT ===
 bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
