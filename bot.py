@@ -295,4 +295,4 @@ async def on_ready():
 
 # 🔑 Run the bot (Insert your token here)
 import os
-bot.run(os.getenv("DISCORD_TOKEN"))
+bot.run(os.getenv("TOKEN_ID"))
