@@ -294,8 +294,5 @@ async def on_ready():
 
 
 # 🔑 Run the bot (Insert your token here)
-if __name__ == "__main__":
-    TOKEN = os.getenv("BOT_TOKEN")
-    if not TOKEN:
-        raise EnvironmentError("❌ BOT_TOKEN not set in environment variables.")
-    bot.run(TOKEN)
+import os
+bot.run(os.getenv("DISCORD_TOKEN"))
