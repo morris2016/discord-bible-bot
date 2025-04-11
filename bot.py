@@ -11,12 +11,13 @@ from mutagen.oggvorbis import OggVorbis
 from urllib.request import urlopen
 from tempfile import NamedTemporaryFile
 
+# === GLOBAL STATE ===
 manifest_data = []
 voice_clients = {}
 playback_index = {}
 playback_contexts = {}
 active_verse_tasks = {}
-last_panel_message = {}  # ✅ Global panel tracker
+last_panel_message = {}
 
 MANIFEST_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json"
 
@@ -27,7 +28,7 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-
+# === AUDIO WRAPPER ===
 class SafeAudio(FFmpegPCMAudio):
     def __init__(self, source_url):
         before_opts = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
@@ -53,10 +54,9 @@ class SafeAudio(FFmpegPCMAudio):
         if self.tempfile_path and os.path.exists(self.tempfile_path):
             os.remove(self.tempfile_path)
 
-
+# === UTILITIES ===
 def normalize_book_name(book: str):
     return book.strip().title()
-
 
 async def fetch_manifest():
     global manifest_data
@@ -66,21 +66,20 @@ async def fetch_manifest():
                 manifest_data = await resp.json()
                 print(f"✅ Loaded {len(manifest_data)} chapters.")
 
-
 def get_index(book: str, chapter: int):
     for i, entry in enumerate(manifest_data):
         if entry['book'].lower() == book.lower() and int(entry['chapter']) == int(chapter):
             return i
     return None
 
-
+# === STREAMER ===
 async def stream_verses(channel, timestamps, vcid):
     def overlapping_chunks(data, size, overlap=1):
         step = size - overlap
         for i in range(0, len(data), step):
             yield data[i:i + size]
 
-    chunks = list(overlapping_chunks(timestamps, 7, overlap=1))  # ✅ Overlap enabled
+    chunks = list(overlapping_chunks(timestamps, 7, overlap=1))
 
     for i, group in enumerate(chunks):
         wait = group[0]["start"] - (time.time() - stream_verses.start_time)
@@ -91,12 +90,8 @@ async def stream_verses(channel, timestamps, vcid):
 
         verses = []
         for j, v in enumerate(group):
-            text = v['text']
-            verse_num = v['verse']
-            if i > 0 and j == 0:  # First verse of non-first chunk
-                verses.append(f"🔁 **{verse_num}**. *{text}*")
-            else:
-                verses.append(f"**{verse_num}**. {text}")
+            verse = f"🔁 **{v['verse']}**. *{v['text']}*" if i > 0 and j == 0 else f"**{v['verse']}**. {v['text']}"
+            verses.append(verse)
 
         embed = discord.Embed(
             title="📖 Scripture Reading",
@@ -106,9 +101,8 @@ async def stream_verses(channel, timestamps, vcid):
         embed.set_footer(text=f"Verses {group[0]['verse']}–{group[-1]['verse']}")
         await channel.send(embed=embed)
         await asyncio.sleep(0.3)
-        await send_panel(channel)  # ✅ Refresh the panel
 
-
+# === PLAYBACK ===
 async def handle_after_playback(error, vcid, source):
     if error:
         print(f"Error: {error}")
@@ -121,7 +115,6 @@ async def handle_after_playback(error, vcid, source):
         ctx = playback_contexts.get(vcid)
         if ctx:
             await play_entry(ctx, next_index)
-
 
 async def play_entry(ctx, index):
     entry = manifest_data[index]
@@ -141,16 +134,17 @@ async def play_entry(ctx, index):
     playback_contexts[vcid] = ctx
 
     source = SafeAudio(entry["url"])
-    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(handle_after_playback(e, vcid, source), bot.loop))
+    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(
+        handle_after_playback(e, vcid, source), bot.loop))
 
     await ctx.send(f"▶️ Now playing: **{entry['book']} {entry['chapter']}**")
 
-    await asyncio.sleep(1.5)  # Sync wait
+    await asyncio.sleep(1.5)
     stream_verses.start_time = time.time()
     task = asyncio.create_task(stream_verses(ctx.channel, entry["timestamps"], vcid))
     active_verse_tasks[vcid] = task
 
-
+# === COMMANDS ===
 @bot.command()
 async def play(ctx, book: str, chapter: str = '1'):
     try:
@@ -162,12 +156,11 @@ async def play(ctx, book: str, chapter: str = '1'):
         return await ctx.send("❌ Chapter not found.")
     await play_entry(ctx, index)
 
-
 @bot.command()
 async def panel(ctx):
     await send_panel(ctx.channel)
 
-
+# === UI PANEL ===
 async def send_panel(channel):
     class AudioControlPanel(View):
         def __init__(self):
@@ -246,15 +239,15 @@ async def send_panel(channel):
                 await interaction.response.edit_message(view=self)
 
         async def play(self, interaction):
+            await interaction.response.send_message("▶️ Playing...", ephemeral=True)  # ✅ immediate feedback
             if not interaction.user.voice or not interaction.user.voice.channel:
-                return await interaction.response.send_message("❌ Join a VC first.", ephemeral=True)
+                return await interaction.followup.send("❌ Join a VC first.", ephemeral=True)
             index = get_index(self.selected_book, self.selected_chapter)
             if index is None:
-                return await interaction.response.send_message("❌ Not found.", ephemeral=True)
+                return await interaction.followup.send("❌ Not found.", ephemeral=True)
             ctx = await bot.get_context(interaction.message)
             ctx.author = interaction.user
             await play_entry(ctx, index)
-            await interaction.response.defer()
 
         async def pause(self, interaction):
             vc = interaction.guild.voice_client
@@ -275,23 +268,21 @@ async def send_panel(channel):
                 await vc.disconnect()
                 await interaction.response.send_message("⏹ Stopped.", ephemeral=True)
 
-    # 🔁 Auto-delete previous panel
+    # Auto-delete old panel
     if channel.id in last_panel_message:
         try:
             await last_panel_message[channel.id].delete()
         except:
             pass
 
-    # 🎯 Send new panel and track it
     msg = await channel.send("🎛️ Bible Audio Control Panel", view=AudioControlPanel())
     last_panel_message[channel.id] = msg
 
-
+# === READY EVENT ===
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await fetch_manifest()
 
-
-# 🔑 Run the bot (Insert your token here)
-bot.run(os.getenv("BOT_TOKEN"))
+# === LAUNCH BOT ===
+bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
