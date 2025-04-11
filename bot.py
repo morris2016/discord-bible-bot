@@ -294,4 +294,4 @@ async def on_ready():
 
 
 # -------- START --------
-bot.run(os.getenv("BOT_TOKEN"))  # ✅ matches Railway secret name
+bot.run(os.getenv("BOT_TOKEN"))  ## ✅ matches Railway secret name
