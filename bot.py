@@ -4,7 +4,6 @@ from discord import FFmpegPCMAudio
 from discord.ui import Button, View
 import aiohttp
 import asyncio
-import json
 import os
 import time
 from mutagen.oggvorbis import OggVorbis
@@ -55,9 +54,6 @@ class SafeAudio(FFmpegPCMAudio):
             os.remove(self.tempfile_path)
 
 # === UTILITIES ===
-def normalize_book_name(book: str):
-    return book.strip().title()
-
 async def fetch_manifest():
     global manifest_data
     async with aiohttp.ClientSession() as session:
@@ -139,6 +135,9 @@ async def play_entry(ctx, index):
 
     await ctx.send(f"▶️ Now playing: **{entry['book']} {entry['chapter']}**")
 
+    # ✅ Show control panel and autodelete old one
+    await send_panel(ctx.channel)
+
     await asyncio.sleep(1.5)
     stream_verses.start_time = time.time()
     task = asyncio.create_task(stream_verses(ctx.channel, entry["timestamps"], vcid))
@@ -168,36 +167,53 @@ async def send_panel(channel):
             self.selected_book = None
             self.selected_chapter = 1
             self.chapter_page = 0
+            self.book_page = 0
             self.all_chapters = []
 
-            books = sorted(set(entry["book"] for entry in manifest_data))[:25]
-            self.book_select = discord.ui.Select(
-                placeholder="📚 Select a book...",
-                options=[discord.SelectOption(label=book) for book in books],
-                row=0
-            )
+            canonical_order = [
+                "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy",
+                "Joshua", "Judges", "Ruth", "1 Samuel", "2 Samuel", "1 Kings", "2 Kings",
+                "1 Chronicles", "2 Chronicles", "Ezra", "Nehemiah", "Esther", "Job",
+                "Psalms", "Proverbs", "Ecclesiastes", "Song of Solomon", "Isaiah",
+                "Jeremiah", "Lamentations", "Ezekiel", "Daniel", "Hosea", "Joel",
+                "Amos", "Obadiah", "Jonah", "Micah", "Nahum", "Habakkuk", "Zephaniah",
+                "Haggai", "Zechariah", "Malachi", "Matthew", "Mark", "Luke", "John",
+                "Acts", "Romans", "1 Corinthians", "2 Corinthians", "Galatians",
+                "Ephesians", "Philippians", "Colossians", "1 Thessalonians", "2 Thessalonians",
+                "1 Timothy", "2 Timothy", "Titus", "Philemon", "Hebrews", "James",
+                "1 Peter", "2 Peter", "1 John", "2 John", "3 John", "Jude", "Revelation"
+            ]
+
+            seen = set()
+            all_books = [entry["book"] for entry in manifest_data]
+            self.sorted_books = [book for book in canonical_order if book in all_books and not (book in seen or seen.add(book))]
+
+            self.book_select = discord.ui.Select(placeholder="📚 Select a book...", options=[], row=0)
             self.book_select.callback = self.book_selected
             self.add_item(self.book_select)
 
-            self.chapter_select = discord.ui.Select(
-                placeholder="🔢 Select chapter...",
-                options=[discord.SelectOption(label="1")],
-                row=1
-            )
+            self.prev_book_page = Button(label="⬅️ Book Page", style=discord.ButtonStyle.secondary, row=1)
+            self.next_book_page = Button(label="➡️ Book Page", style=discord.ButtonStyle.secondary, row=1)
+            self.prev_book_page.callback = self.prev_book
+            self.next_book_page.callback = self.next_book
+            self.add_item(self.prev_book_page)
+            self.add_item(self.next_book_page)
+
+            self.chapter_select = discord.ui.Select(placeholder="🔢 Select chapter...", options=[discord.SelectOption(label="1")], row=2)
             self.chapter_select.callback = self.chapter_changed
             self.add_item(self.chapter_select)
 
-            self.prev_button = Button(label="⬅️ Prev Page", style=discord.ButtonStyle.secondary, row=2)
-            self.next_button = Button(label="➡️ Next Page", style=discord.ButtonStyle.secondary, row=2)
+            self.prev_button = Button(label="⬅️ Chapter Page", style=discord.ButtonStyle.secondary, row=3)
+            self.next_button = Button(label="➡️ Chapter Page", style=discord.ButtonStyle.secondary, row=3)
             self.prev_button.callback = self.prev_page
             self.next_button.callback = self.next_page
             self.add_item(self.prev_button)
             self.add_item(self.next_button)
 
-            self.play_button = Button(label="▶️ Play", style=discord.ButtonStyle.green, row=3)
-            self.pause_button = Button(label="⏸ Pause", style=discord.ButtonStyle.blurple, row=3)
-            self.resume_button = Button(label="▶ Resume", style=discord.ButtonStyle.green, row=3)
-            self.stop_button = Button(label="⏹ Stop", style=discord.ButtonStyle.red, row=3)
+            self.play_button = Button(label="▶️ Play", style=discord.ButtonStyle.green, row=4)
+            self.pause_button = Button(label="⏸ Pause", style=discord.ButtonStyle.blurple, row=4)
+            self.resume_button = Button(label="▶ Resume", style=discord.ButtonStyle.green, row=4)
+            self.stop_button = Button(label="⏹ Stop", style=discord.ButtonStyle.red, row=4)
             self.play_button.callback = self.play
             self.pause_button.callback = self.pause
             self.resume_button.callback = self.resume
@@ -206,6 +222,14 @@ async def send_panel(channel):
             self.add_item(self.pause_button)
             self.add_item(self.resume_button)
             self.add_item(self.stop_button)
+
+            self.update_book_dropdown()
+
+        def update_book_dropdown(self):
+            start = self.book_page * 25
+            end = start + 25
+            sliced = self.sorted_books[start:end]
+            self.book_select.options = [discord.SelectOption(label=book) for book in sliced]
 
         async def book_selected(self, interaction):
             self.selected_book = self.book_select.values[0]
@@ -225,6 +249,19 @@ async def send_panel(channel):
                 discord.SelectOption(label=str(ch)) for ch in self.all_chapters[start:end]
             ]
 
+        async def prev_book(self, interaction):
+            if self.book_page > 0:
+                self.book_page -= 1
+                self.update_book_dropdown()
+                await interaction.response.edit_message(view=self)
+
+        async def next_book(self, interaction):
+            max_pages = (len(self.sorted_books) - 1) // 25
+            if self.book_page < max_pages:
+                self.book_page += 1
+                self.update_book_dropdown()
+                await interaction.response.edit_message(view=self)
+
         async def prev_page(self, interaction):
             if self.chapter_page > 0:
                 self.chapter_page -= 1
@@ -239,7 +276,7 @@ async def send_panel(channel):
                 await interaction.response.edit_message(view=self)
 
         async def play(self, interaction):
-            await interaction.response.send_message("▶️ Playing...", ephemeral=True)  # ✅ immediate feedback
+            await interaction.response.send_message("▶️ Playing...", ephemeral=True)
             if not interaction.user.voice or not interaction.user.voice.channel:
                 return await interaction.followup.send("❌ Join a VC first.", ephemeral=True)
             index = get_index(self.selected_book, self.selected_chapter)
@@ -268,21 +305,21 @@ async def send_panel(channel):
                 await vc.disconnect()
                 await interaction.response.send_message("⏹ Stopped.", ephemeral=True)
 
-    # Auto-delete old panel
     if channel.id in last_panel_message:
         try:
             await last_panel_message[channel.id].delete()
         except:
             pass
 
-    msg = await channel.send("🎛️ Bible Audio Control Panel", view=AudioControlPanel())
-    last_panel_message[channel.id] = msg
+    panel_msg = await channel.send("🎛️ Bible Audio Control Panel", view=AudioControlPanel())
+    await channel.send("🔗 **Join us & discuss Scripture:** https://discord.gg/py6neEZa98")
+    last_panel_message[channel.id] = panel_msg
 
 # === READY EVENT ===
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
-    await fetch_manifest() #
+    await fetch_manifest()
 
 # === LAUNCH BOT ===
 bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
