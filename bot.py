@@ -155,7 +155,20 @@ async def play_entry(ctx, index):
     active_verse_tasks[vcid] = task
 
 # === COMMANDS ===
-# Removed text commands to avoid confusion; use the UI panel only
+@bot.command()
+async def play(ctx, book: str, chapter: str = '1'):
+    try:
+        chapter = int(chapter)
+    except:
+        return await ctx.send("❌ Invalid chapter.")
+    index = get_index(book, chapter)
+    if index is None:
+        return await ctx.send("❌ Chapter not found.")
+    await play_entry(ctx, index)
+
+@bot.command()
+async def panel(ctx):
+    await send_panel(ctx.channel)
 
 # === UI PANEL ===
 async def send_panel(channel):
@@ -318,6 +331,10 @@ async def send_panel(channel):
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await fetch_manifest()
+    # Remove slash commands to avoid confusion
+    for guild in bot.guilds:
+        bot.tree.clear_commands(guild=guild)
+    await bot.tree.sync()
 
 # === LAUNCH BOT ===
 bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
