@@ -155,20 +155,7 @@ async def play_entry(ctx, index):
     active_verse_tasks[vcid] = task
 
 # === COMMANDS ===
-@bot.command()
-async def play(ctx, book: str, chapter: str = '1'):
-    try:
-        chapter = int(chapter)
-    except:
-        return await ctx.send("❌ Invalid chapter.")
-    index = get_index(book, chapter)
-    if index is None:
-        return await ctx.send("❌ Chapter not found.")
-    await play_entry(ctx, index)
-
-@bot.command()
-async def panel(ctx):
-    await send_panel(ctx.channel)
+# Removed text commands to avoid confusion; use the UI panel only
 
 # === UI PANEL ===
 async def send_panel(channel):
