@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from discord import FFmpegPCMAudio
+from discord import FFmpegPCMAudio, app_commands
 from discord.ui import Button, View
 import aiohttp
 import asyncio
@@ -155,14 +155,15 @@ async def play_entry(ctx, index):
     active_verse_tasks[vcid] = task
 
 # === COMMANDS ===
-@commands.hybrid_command()
+@commands.hybrid_command(description="Play a specific Bible chapter")
+@app_commands.describe(book="Name of the book (e.g., Genesis)", chapter="Chapter number")
 async def play(ctx, book: str, chapter: int = 1):
     index = get_index(book, chapter)
     if index is None:
         return await ctx.send("❌ Chapter not found.")
     await play_entry(ctx, index)
 
-@commands.hybrid_command()
+@commands.hybrid_command(description="Show the Bible audio control panel")
 async def panel(ctx):
     await send_panel(ctx.channel)
 
