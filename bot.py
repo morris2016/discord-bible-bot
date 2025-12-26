@@ -155,18 +155,14 @@ async def play_entry(ctx, index):
     active_verse_tasks[vcid] = task
 
 # === COMMANDS ===
-@bot.command()
-async def play(ctx, book: str, chapter: str = '1'):
-    try:
-        chapter = int(chapter)
-    except:
-        return await ctx.send("❌ Invalid chapter.")
+@commands.hybrid_command()
+async def play(ctx, book: str, chapter: int = 1):
     index = get_index(book, chapter)
     if index is None:
         return await ctx.send("❌ Chapter not found.")
     await play_entry(ctx, index)
 
-@bot.command()
+@commands.hybrid_command()
 async def panel(ctx):
     await send_panel(ctx.channel)
 
@@ -331,10 +327,9 @@ async def send_panel(channel):
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await fetch_manifest()
-    # Remove slash commands to avoid confusion
-    for guild in bot.guilds:
-        bot.tree.clear_commands(guild=guild)
     await bot.tree.sync()
+    bot.add_command(play)
+    bot.add_command(panel)
 
 # === LAUNCH BOT ===
 bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
