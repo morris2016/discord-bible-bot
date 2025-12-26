@@ -320,7 +320,7 @@ async def send_panel(channel):
             pass
 
     panel_msg = await channel.send("🎛️ Bible Audio Control Panel", view=AudioControlPanel())
-    await channel.send("🔗 **Join us & discuss Scripture:** https://discord.gg/py6neEZa98")
+    await channel.send("🔗 **Support:** https://buymeacoffee.com/siagmoo26i")
     last_panel_message[channel.id] = panel_msg
 
 # === READY EVENT ===
