@@ -78,9 +78,20 @@ async def stream_verses(channel, timestamps, vcid):
     chunks = list(overlapping_chunks(timestamps, 7, overlap=1))
 
     for i, group in enumerate(chunks):
-        wait = group[0]["start"] - (time.time() - stream_verses.start_time)
-        if wait > 0:
-            await asyncio.sleep(wait)
+        vc = voice_clients.get(vcid)
+        if not vc or not vc.is_connected():
+            return
+        while True:
+            wait = group[0]["start"] - (time.time() - stream_verses.start_time)
+            if wait > 0:
+                await asyncio.sleep(min(wait, 0.1))
+                vc = voice_clients.get(vcid)
+                if not vc or not vc.is_connected():
+                    return
+                if vc.is_paused():
+                    continue
+            else:
+                break
         if vcid not in active_verse_tasks or active_verse_tasks[vcid].cancelled():
             return
 
