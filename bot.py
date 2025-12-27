@@ -17,6 +17,8 @@ playback_index = {}
 playback_contexts = {}
 active_verse_tasks = {}
 last_panel_message = {}
+pause_state = {}  # Track pause timing for each voice client
+# Format: {vcid: {'total_pause_time': float, 'pause_start_time': float | None}}
 
 MANIFEST_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json"
 
@@ -76,22 +78,34 @@ async def stream_verses(channel, timestamps, vcid):
             yield data[i:i + size]
 
     chunks = list(overlapping_chunks(timestamps, 7, overlap=1))
-
+    base_start_time = time.time()
+    
     for i, group in enumerate(chunks):
         vc = voice_clients.get(vcid)
         if not vc or not vc.is_connected():
             return
+            
+        # Calculate effective elapsed time accounting for pauses
+        def get_effective_elapsed():
+            current_elapsed = time.time() - base_start_time
+            pause_info = pause_state.get(vcid, {'total_pause_time': 0.0, 'pause_start_time': None})
+            # Subtract accumulated pause time
+            current_elapsed -= pause_info['total_pause_time']
+            # If currently paused, subtract the current pause duration too
+            if pause_info['pause_start_time']:
+                current_elapsed -= (time.time() - pause_info['pause_start_time'])
+            return max(0, current_elapsed)  # Ensure non-negative
+
         while True:
-            wait = group[0]["start"] - (time.time() - stream_verses.start_time)
-            if wait > 0:
-                await asyncio.sleep(min(wait, 0.1))
-                vc = voice_clients.get(vcid)
-                if not vc or not vc.is_connected():
-                    return
-                if vc.is_paused():
-                    continue
-            else:
+            effective_elapsed = get_effective_elapsed()
+            wait = group[0]["start"] - effective_elapsed
+            if wait <= 0:
                 break
+            await asyncio.sleep(min(wait, 0.1))
+            vc = voice_clients.get(vcid)
+            if not vc or not vc.is_connected():
+                return
+                
         if vcid not in active_verse_tasks or active_verse_tasks[vcid].cancelled():
             return
 
@@ -136,6 +150,9 @@ async def play_entry(ctx, index):
         vc.stop()
     if vcid in active_verse_tasks:
         active_verse_tasks[vcid].cancel()
+    
+    # Clean up pause state for new playback
+    pause_state[vcid] = {'total_pause_time': 0.0, 'pause_start_time': None}
 
     playback_index[vcid] = index
     playback_contexts[vcid] = ctx
@@ -150,7 +167,6 @@ async def play_entry(ctx, index):
     await send_panel(ctx.channel)
 
     await asyncio.sleep(1.5)
-    stream_verses.start_time = time.time()
     task = asyncio.create_task(stream_verses(ctx.channel, entry["timestamps"], vcid))
     active_verse_tasks[vcid] = task
 
@@ -297,20 +313,38 @@ async def send_panel(channel):
         async def pause(self, interaction):
             vc = interaction.guild.voice_client
             if vc and vc.is_playing():
+                vcid = interaction.guild.voice_client.channel.id
                 vc.pause()
+                # Track pause state for verse synchronization
+                if vcid not in pause_state:
+                    pause_state[vcid] = {'total_pause_time': 0.0, 'pause_start_time': None}
+                pause_state[vcid]['pause_start_time'] = time.time()
                 await interaction.response.send_message("⏸ Paused.", ephemeral=True)
 
         async def resume(self, interaction):
             vc = interaction.guild.voice_client
             if vc and vc.is_paused():
+                vcid = interaction.guild.voice_client.channel.id
                 vc.resume()
+                # Calculate and store accumulated pause time
+                if vcid in pause_state and pause_state[vcid]['pause_start_time']:
+                    pause_duration = time.time() - pause_state[vcid]['pause_start_time']
+                    pause_state[vcid]['total_pause_time'] += pause_duration
+                    pause_state[vcid]['pause_start_time'] = None
                 await interaction.response.send_message("▶ Resumed.", ephemeral=True)
 
         async def stop(self, interaction):
             vc = interaction.guild.voice_client
             if vc:
+                vcid = interaction.guild.voice_client.channel.id
                 vc.stop()
                 await vc.disconnect()
+                # Clean up all state
+                if vcid in pause_state:
+                    del pause_state[vcid]
+                if vcid in active_verse_tasks:
+                    active_verse_tasks[vcid].cancel()
+                    del active_verse_tasks[vcid]
                 await interaction.response.send_message("⏹ Stopped.", ephemeral=True)
 
     if channel.id in last_panel_message:
