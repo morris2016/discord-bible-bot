@@ -560,11 +560,17 @@ async def send_panel(channel):
             self.all_chapters = sorted({int(e["chapter"]) for e in manifest_data if e["book"] == self.selected_book})
             self.chapter_page = 0
             await self.update_chapter_dropdown()
-            await interaction.response.edit_message(content=f"📘 {self.selected_book}", view=self)
+            
+            # Update main message to show current selection
+            selection_text = f"📘 {self.selected_book} {self.selected_chapter}"
+            await interaction.response.edit_message(content=selection_text, view=self)
 
         async def chapter_changed(self, interaction):
             self.selected_chapter = int(self.chapter_select.values[0])
-            await interaction.response.edit_message(content=f"📘 {self.selected_book} {self.selected_chapter}", view=self)
+            
+            # Update main message to show current selection
+            selection_text = f"📘 {self.selected_book} {self.selected_chapter}"
+            await interaction.response.edit_message(content=selection_text, view=self)
 
         async def update_chapter_dropdown(self):
             start = self.chapter_page * 25
@@ -577,27 +583,39 @@ async def send_panel(channel):
             if self.book_page > 0:
                 self.book_page -= 1
                 self.update_book_dropdown()
-                await interaction.response.edit_message(view=self)
+                
+                # Update main message to show current selection
+                selection_text = f"📘 {self.selected_book} {self.selected_chapter}" if self.selected_book else "🎛️ Bible Audio Control Panel"
+                await interaction.response.edit_message(content=selection_text, view=self)
 
         async def next_book(self, interaction):
             max_pages = (len(self.sorted_books) - 1) // 25
             if self.book_page < max_pages:
                 self.book_page += 1
                 self.update_book_dropdown()
-                await interaction.response.edit_message(view=self)
+                
+                # Update main message to show current selection
+                selection_text = f"📘 {self.selected_book} {self.selected_chapter}" if self.selected_book else "🎛️ Bible Audio Control Panel"
+                await interaction.response.edit_message(content=selection_text, view=self)
 
         async def prev_page(self, interaction):
             if self.chapter_page > 0:
                 self.chapter_page -= 1
                 await self.update_chapter_dropdown()
-                await interaction.response.edit_message(view=self)
+                
+                # Update main message to show current selection
+                selection_text = f"📘 {self.selected_book} {self.selected_chapter}" if self.selected_book else "🎛️ Bible Audio Control Panel"
+                await interaction.response.edit_message(content=selection_text, view=self)
 
         async def next_page(self, interaction):
             max_pages = (len(self.all_chapters) - 1) // 25
             if self.chapter_page < max_pages:
                 self.chapter_page += 1
                 await self.update_chapter_dropdown()
-                await interaction.response.edit_message(view=self)
+                
+                # Update main message to show current selection
+                selection_text = f"📘 {self.selected_book} {self.selected_chapter}" if self.selected_book else "🎛️ Bible Audio Control Panel"
+                await interaction.response.edit_message(content=selection_text, view=self)
 
         async def play(self, interaction):
             await interaction.response.send_message("▶️ Playing...", ephemeral=True)
