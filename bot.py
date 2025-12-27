@@ -458,11 +458,11 @@ async def send_panel(channel):
     class AudioControlPanel(View):
         def __init__(self):
             super().__init__(timeout=None)
-            self.selected_book = "Genesis"  # Default to Genesis
-            self.selected_chapter = 1  # Default to chapter 1
+            self.selected_book = None  # Will be set when book is first selected
+            self.selected_chapter = 1
             self.chapter_page = 0
             self.book_page = 0
-            self.all_chapters = sorted({int(e["chapter"]) for e in manifest_data if e["book"] == "Genesis"})
+            self.all_chapters = []  # Will be populated when book is selected
 
             canonical_order = [
                 "Genesis", "Exodus", "Leviticus", "Numbers", "Deuteronomy",
@@ -493,7 +493,7 @@ async def send_panel(channel):
             self.add_item(self.prev_book_page)
             self.add_item(self.next_book_page)
 
-            self.chapter_select = discord.ui.Select(placeholder="🔢 Select chapter...", options=[], row=2)
+            self.chapter_select = discord.ui.Select(placeholder="🔢 Select a book first...", options=[], row=2)
             self.chapter_select.callback = self.chapter_changed
             self.add_item(self.chapter_select)
 
@@ -518,7 +518,18 @@ async def send_panel(channel):
             self.add_item(self.stop_button)
 
             self.update_book_dropdown()
-            self.update_chapter_dropdown()
+
+        async def book_selected(self, interaction):
+            self.selected_book = self.book_select.values[0]
+            self.all_chapters = sorted({int(e["chapter"]) for e in manifest_data if e["book"] == self.selected_book})
+            self.chapter_page = 0
+            self.update_chapter_dropdown()  # Now synchronous
+            await interaction.response.edit_message(content=f"📘 {self.selected_book}", view=self)
+
+        async def chapter_changed(self, interaction):
+            self.selected_chapter = int(self.chapter_select.values[0])
+            self.update_chapter_dropdown()  # Now synchronous
+            await interaction.response.edit_message(content=f"📘 {self.selected_book} {self.selected_chapter}", view=self)
 
         def update_book_dropdown(self):
             start = self.book_page * 25
@@ -532,20 +543,13 @@ async def send_panel(channel):
             else:
                 self.book_select.placeholder = "📚 Select a book..."
 
-        async def book_selected(self, interaction):
-            self.selected_book = self.book_select.values[0]
-            self.all_chapters = sorted({int(e["chapter"]) for e in manifest_data if e["book"] == self.selected_book})
-            self.chapter_page = 0
-            await self.update_chapter_dropdown()
-            await interaction.response.edit_message(content=f"📘 {self.selected_book}", view=self)
-
-        async def chapter_changed(self, interaction):
-            self.selected_chapter = int(self.chapter_select.values[0])
-            # Update the dropdown to show the selected chapter as default
-            await self.update_chapter_dropdown()
-            await interaction.response.edit_message(content=f"📘 {self.selected_book} {self.selected_chapter}", view=self)
-
-        async def update_chapter_dropdown(self):
+        def update_chapter_dropdown(self):
+            if not self.all_chapters:
+                # No chapters available, show empty dropdown
+                self.chapter_select.options = []
+                self.chapter_select.placeholder = "🔢 Select a book first..."
+                return
+                
             start = self.chapter_page * 25
             end = start + 25
             
@@ -555,13 +559,13 @@ async def send_panel(channel):
                 for ch in self.all_chapters[start:end]
             ]
             
+            self.chapter_select.options = chapter_options
+            
             # Set the placeholder to show current selection if available
             if self.selected_chapter in self.all_chapters[start:end]:
                 self.chapter_select.placeholder = f"🔢 Chapter {self.selected_chapter}"
             else:
                 self.chapter_select.placeholder = "🔢 Select chapter..."
-            
-            self.chapter_select.options = chapter_options
 
         async def prev_book(self, interaction):
             if self.book_page > 0:
@@ -579,14 +583,14 @@ async def send_panel(channel):
         async def prev_page(self, interaction):
             if self.chapter_page > 0:
                 self.chapter_page -= 1
-                await self.update_chapter_dropdown()
+                self.update_chapter_dropdown()  # Now synchronous
                 await interaction.response.edit_message(view=self)
 
         async def next_page(self, interaction):
             max_pages = (len(self.all_chapters) - 1) // 25
             if self.chapter_page < max_pages:
                 self.chapter_page += 1
-                await self.update_chapter_dropdown()
+                self.update_chapter_dropdown()  # Now synchronous
                 await interaction.response.edit_message(view=self)
 
         async def play(self, interaction):
