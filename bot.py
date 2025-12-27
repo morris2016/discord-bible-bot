@@ -225,6 +225,90 @@ async def queue(ctx):
     embed.set_footer(text=f"Total: {len(playback_queue[vcid])} chapter(s)")
     await ctx.send(embed=embed)
 
+@commands.hybrid_command(description="Pause current playback")
+async def pause(ctx):
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.send("❌ Join a VC first.")
+    
+    vc = ctx.guild.voice_client
+    if vc and vc.is_playing():
+        vcid = ctx.author.voice.channel.id
+        vc.pause()
+        # Track pause state for verse synchronization
+        if vcid not in pause_state:
+            pause_state[vcid] = {'total_pause_time': 0.0, 'pause_start_time': None}
+        pause_state[vcid]['pause_start_time'] = time.time()
+        await ctx.send("⏸ Paused.")
+    else:
+        await ctx.send("❌ Nothing is playing.")
+
+@commands.hybrid_command(description="Resume paused playback")
+async def resume(ctx):
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.send("❌ Join a VC first.")
+    
+    vc = ctx.guild.voice_client
+    if vc and vc.is_paused():
+        vcid = ctx.author.voice.channel.id
+        vc.resume()
+        # Calculate and store accumulated pause time
+        if vcid in pause_state and pause_state[vcid]['pause_start_time']:
+            pause_duration = time.time() - pause_state[vcid]['pause_start_time']
+            pause_state[vcid]['total_pause_time'] += pause_duration
+            pause_state[vcid]['pause_start_time'] = None
+        await ctx.send("▶ Resumed.")
+    else:
+        await ctx.send("❌ Nothing is paused.")
+
+@commands.hybrid_command(description="Skip to next chapter in queue")
+async def next(ctx):
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.send("❌ Join a VC first.")
+    
+    vcid = ctx.author.voice.channel.id
+    vc = ctx.guild.voice_client
+    
+    if not vc or not (vc.is_playing() or vc.is_paused()):
+        return await ctx.send("❌ Nothing is playing.")
+    
+    # Stop current playback
+    vc.stop()
+    
+    # Clean up current verse task
+    if vcid in active_verse_tasks:
+        active_verse_tasks[vcid].cancel()
+    
+    # Clear pause state
+    if vcid in pause_state:
+        del pause_state[vcid]
+    
+    await ctx.send("⏭️ Skipped to next chapter.")
+
+@commands.hybrid_command(description="Stop all playback and clear queue")
+async def stop(ctx):
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.send("❌ Join a VC first.")
+    
+    vcid = ctx.author.voice.channel.id
+    vc = ctx.guild.voice_client
+    
+    if vc:
+        vc.stop()
+        await vc.disconnect()
+        
+        # Clean up all state
+        if vcid in pause_state:
+            del pause_state[vcid]
+        if vcid in active_verse_tasks:
+            active_verse_tasks[vcid].cancel()
+            del active_verse_tasks[vcid]
+        if vcid in playback_queue:
+            del playback_queue[vcid]
+        
+        await ctx.send("⏹ Stopped and cleared queue.")
+    else:
+        await ctx.send("❌ Nothing is playing.")
+
 # === UI PANEL ===
 async def send_panel(channel):
     class AudioControlPanel(View):
@@ -409,6 +493,10 @@ async def on_ready():
     bot.add_command(play)
     bot.add_command(panel)
     bot.add_command(queue)
+    bot.add_command(pause)
+    bot.add_command(resume)
+    bot.add_command(next)
+    bot.add_command(stop)
 
 # === LAUNCH BOT ===
 bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
