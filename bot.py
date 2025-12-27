@@ -6,7 +6,6 @@ import aiohttp
 import asyncio
 import os
 import time
-import random
 from mutagen.oggvorbis import OggVorbis
 from urllib.request import urlopen
 from tempfile import NamedTemporaryFile
@@ -18,20 +17,6 @@ playback_index = {}
 playback_contexts = {}
 active_verse_tasks = {}
 last_panel_message = {}
-
-# Devotion messages for keep-alive
-DEVOTION_MESSAGES = [
-    "🌟 *Remember, God's love is everlasting.* - Jeremiah 31:3",
-    "🙏 *Pray without ceasing.* - 1 Thessalonians 5:17",
-    "📖 *All Scripture is God-breathed.* - 2 Timothy 3:16",
-    "❤️ *Love your neighbor as yourself.* - Matthew 22:39",
-    "✨ *Be strong and courageous.* - Joshua 1:9",
-    "🕊️ *Peace I leave with you.* - John 14:27",
-    "🔥 *Let your light shine.* - Matthew 5:16",
-    "⏳ *Trust in the Lord with all your heart.* - Proverbs 3:5",
-    "🌈 *His mercies are new every morning.* - Lamentations 3:22-23",
-    "🎶 *Sing praises to the Lord.* - Psalm 147:1"
-]
 
 MANIFEST_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json"
 
@@ -82,26 +67,6 @@ def get_index(book: str, chapter: int):
         if entry['book'].lower() == book.lower() and int(entry['chapter']) == int(chapter):
             return i
     return None
-
-async def send_random_devotion():
-    """Send a random devotion message to a random channel in each guild to keep the bot active."""
-    for guild in bot.guilds:
-        # Find a suitable text channel
-        channel = None
-        if guild.system_channel and guild.system_channel.permissions_for(guild.me).send_messages:
-            channel = guild.system_channel
-        else:
-            for ch in guild.text_channels:
-                if ch.permissions_for(guild.me).send_messages:
-                    channel = ch
-                    break
-        if channel:
-            message = random.choice(DEVOTION_MESSAGES)
-            try:
-                await channel.send(message)
-                print(f"Sent devotion to {guild.name} in {channel.name}")
-            except Exception as e:
-                print(f"Failed to send devotion to {guild.name}: {e}")
 
 # === STREAMER ===
 async def stream_verses(channel, timestamps, vcid):
@@ -365,16 +330,6 @@ async def on_ready():
     await bot.tree.sync()
     bot.add_command(play)
     bot.add_command(panel)
-
-    # Start keep-alive task
-    bot.loop.create_task(keep_alive_task())
-
-async def keep_alive_task():
-    """Task to send devotion messages every hour to prevent sleeping."""
-    await asyncio.sleep(3600)  # Wait 1 hour before first send
-    while True:
-        await send_random_devotion()
-        await asyncio.sleep(3600)  # Send every hour
 
 # === LAUNCH BOT ===
 bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
