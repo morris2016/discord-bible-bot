@@ -69,6 +69,7 @@ async def fetch_manifest():
 def get_index(book: str, chapter: int):
     # Normalize book name for better matching
     normalized_book = book.lower().strip()
+    print(f"DEBUG get_index: Looking for '{book}' -> normalized to '{normalized_book}' chapter {chapter}")
     
     # Handle books with numbers (1, 2, 3 John, Peter, etc.)
     number_words = {
@@ -79,35 +80,47 @@ def get_index(book: str, chapter: int):
     # Try exact match first
     for i, entry in enumerate(manifest_data):
         if entry['book'].lower() == normalized_book and int(entry['chapter']) == int(chapter):
+            print(f"DEBUG: Exact match found: {entry['book']} {entry['chapter']}")
             return i
+    
+    # Show some sample book names from manifest to debug
+    peter_books = [entry for entry in manifest_data if 'peter' in entry['book'].lower()]
+    print(f"DEBUG: Peter books in manifest: {[(e['book'], e['chapter']) for e in peter_books[:5]]}")
     
     # Try fuzzy matching for books with numbers
     book_parts = normalized_book.split()
+    print(f"DEBUG: Book parts: {book_parts}")
     
     if len(book_parts) >= 2:
         # Check if first part is a number
         first_part = book_parts[0]
+        print(f"DEBUG: First part: '{first_part}'")
         
         if first_part in number_words:
             number = number_words[first_part]
             remaining_parts = book_parts[1:]
+            print(f"DEBUG: Number: '{number}', Remaining parts: {remaining_parts}")
             
             # Try "X Bookname" format
             for i, entry in enumerate(manifest_data):
                 entry_book = entry['book'].lower()
+                print(f"DEBUG: Checking entry: '{entry_book}'")
                 
                 # Check if it starts with the number
                 if entry_book.startswith(number + ' '):
                     book_part = entry_book[len(number) + 1:].strip()
                     expected_book = ' '.join(remaining_parts).strip()
+                    print(f"DEBUG: Entry book part: '{book_part}', Expected: '{expected_book}'")
                     
                     # Try exact match
                     if book_part == expected_book:
+                        print(f"DEBUG: Exact match found in fuzzy: {entry['book']} {entry['chapter']}")
                         if int(entry['chapter']) == int(chapter):
                             return i
                     
                     # Try partial match (in case of extra words or slight differences)
                     elif expected_book in book_part or book_part in expected_book:
+                        print(f"DEBUG: Partial match found in fuzzy: {entry['book']} {entry['chapter']}")
                         if int(entry['chapter']) == int(chapter):
                             return i
             
@@ -118,20 +131,25 @@ def get_index(book: str, chapter: int):
                 if len(entry_parts) >= 2 and entry_parts[-1] == number:
                     book_name = ' '.join(entry_parts[:-1])
                     expected_book = ' '.join(remaining_parts)
+                    print(f"DEBUG: Book name from entry: '{book_name}', Expected: '{expected_book}'")
                     
                     if (book_name == expected_book or 
                         expected_book in book_name or 
                         book_name in expected_book):
+                        print(f"DEBUG: Reverse format match: {entry['book']} {entry['chapter']}")
                         if int(entry['chapter']) == int(chapter):
                             return i
     
     # Try removing spaces and punctuation for compact formats
     compact_normalized = normalized_book.replace(' ', '').replace('.', '')
+    print(f"DEBUG: Compact normalized: '{compact_normalized}'")
     for i, entry in enumerate(manifest_data):
         entry_compact = entry['book'].lower().replace(' ', '').replace('.', '')
         if entry_compact == compact_normalized and int(entry['chapter']) == int(chapter):
+            print(f"DEBUG: Compact match found: {entry['book']} {entry['chapter']}")
             return i
     
+    print(f"DEBUG: No match found for '{normalized_book}'")
     return None
 
 # === STREAMER ===
