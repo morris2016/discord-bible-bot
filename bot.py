@@ -19,6 +19,8 @@ active_verse_tasks = {}
 last_panel_message = {}
 pause_state = {}  # Track pause timing for each voice client
 # Format: {vcid: {'total_pause_time': float, 'pause_start_time': float | None}}
+playback_queue = {}  # Queue chapters for each voice client
+# Format: {vcid: [chapter_index1, chapter_index2, ...]}
 
 MANIFEST_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json"
 
@@ -131,6 +133,16 @@ async def handle_after_playback(error, vcid, source):
     source.cleanup()
     if vcid not in voice_clients or not voice_clients[vcid].is_connected():
         return
+    
+    # Check if there are queued chapters to play next
+    if vcid in playback_queue and playback_queue[vcid]:
+        next_index = playback_queue[vcid].pop(0)
+        ctx = playback_contexts.get(vcid)
+        if ctx:
+            await play_entry(ctx, next_index)
+        return
+    
+    # Otherwise, play the next chapter from the manifest (sequential playback)
     next_index = playback_index.get(vcid, -1) + 1
     if next_index < len(manifest_data):
         ctx = playback_contexts.get(vcid)
@@ -145,6 +157,14 @@ async def play_entry(ctx, index):
     if not vc or not vc.is_connected():
         vc = await ctx.author.voice.channel.connect()
         voice_clients[vcid] = vc
+
+    # Check if something is already playing - if so, queue the new chapter
+    if vc.is_playing() or vc.is_paused():
+        if vcid not in playback_queue:
+            playback_queue[vcid] = []
+        playback_queue[vcid].append(index)
+        await ctx.send(f"📝 Added to queue: **{entry['book']} {entry['chapter']}** (Position {len(playback_queue[vcid])})")
+        return
 
     if vc.is_playing():
         vc.stop()
@@ -182,6 +202,28 @@ async def play(ctx, book: str, chapter: int = 1):
 @commands.hybrid_command(description="Show the Bible audio control panel")
 async def panel(ctx):
     await send_panel(ctx.channel)
+
+@commands.hybrid_command(description="Show current playback queue")
+async def queue(ctx):
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        return await ctx.send("❌ Join a VC first.")
+    
+    vcid = ctx.author.voice.channel.id
+    if vcid not in playback_queue or not playback_queue[vcid]:
+        return await ctx.send("📝 Queue is empty.")
+    
+    queue_list = []
+    for i, index in enumerate(playback_queue[vcid], 1):
+        entry = manifest_data[index]
+        queue_list.append(f"**{i}**. {entry['book']} {entry['chapter']}")
+    
+    embed = discord.Embed(
+        title="📋 Playback Queue",
+        description="\n".join(queue_list),
+        color=discord.Color.blue()
+    )
+    embed.set_footer(text=f"Total: {len(playback_queue[vcid])} chapter(s)")
+    await ctx.send(embed=embed)
 
 # === UI PANEL ===
 async def send_panel(channel):
@@ -345,7 +387,9 @@ async def send_panel(channel):
                 if vcid in active_verse_tasks:
                     active_verse_tasks[vcid].cancel()
                     del active_verse_tasks[vcid]
-                await interaction.response.send_message("⏹ Stopped.", ephemeral=True)
+                if vcid in playback_queue:
+                    del playback_queue[vcid]
+                await interaction.response.send_message("⏹ Stopped and cleared queue.", ephemeral=True)
 
     if channel.id in last_panel_message:
         try:
@@ -364,6 +408,7 @@ async def on_ready():
     await bot.tree.sync()
     bot.add_command(play)
     bot.add_command(panel)
+    bot.add_command(queue)
 
 # === LAUNCH BOT ===
 bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
