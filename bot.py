@@ -67,9 +67,53 @@ async def fetch_manifest():
                 print(f"✅ Loaded {len(manifest_data)} chapters.")
 
 def get_index(book: str, chapter: int):
+    # Normalize book name for better matching
+    normalized_book = book.lower().strip()
+    
+    # Handle books with numbers (1, 2, 3 John, Peter, etc.)
+    number_words = {
+        '1': '1', '2': '2', '3': '3',
+        'one': '1', 'two': '2', 'three': '3'
+    }
+    
+    # Try exact match first
     for i, entry in enumerate(manifest_data):
-        if entry['book'].lower() == book.lower() and int(entry['chapter']) == int(chapter):
+        if entry['book'].lower() == normalized_book and int(entry['chapter']) == int(chapter):
             return i
+    
+    # Try fuzzy matching for books with numbers
+    book_parts = normalized_book.split()
+    if len(book_parts) >= 2:
+        # Check if first part is a number
+        first_part = book_parts[0]
+        if first_part in number_words:
+            number = number_words[first_part]
+            remaining_parts = book_parts[1:]
+            
+            # Try "X Bookname" format
+            for i, entry in enumerate(manifest_data):
+                entry_book = entry['book'].lower()
+                if entry_book.startswith(number + ' ') and entry_book[len(number) + 1:] == ' '.join(remaining_parts):
+                    if int(entry['chapter']) == int(chapter):
+                        return i
+            
+            # Try "Bookname X" format (like "Peter 2")
+            for i, entry in enumerate(manifest_data):
+                entry_book = entry['book'].lower()
+                entry_parts = entry_book.split()
+                if len(entry_parts) >= 2 and entry_parts[-1] == number:
+                    book_name = ' '.join(entry_parts[:-1])
+                    if book_name == ' '.join(remaining_parts):
+                        if int(entry['chapter']) == int(chapter):
+                            return i
+    
+    # Try removing spaces and punctuation for compact formats
+    compact_normalized = normalized_book.replace(' ', '').replace('.', '')
+    for i, entry in enumerate(manifest_data):
+        entry_compact = entry['book'].lower().replace(' ', '').replace('.', '')
+        if entry_compact == compact_normalized and int(entry['chapter']) == int(chapter):
+            return i
+    
     return None
 
 # === STREAMER ===
