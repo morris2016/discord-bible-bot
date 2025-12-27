@@ -70,6 +70,74 @@ def get_index(book: str, chapter: int):
     # Normalize book name for better matching
     normalized_book = book.lower().strip()
     
+    # Comprehensive book abbreviations mapping
+    book_abbreviations = {
+        # Old Testament - Standard abbreviations
+        'gen': 'Genesis', 'exo': 'Exodus', 'lev': 'Leviticus', 'num': 'Numbers', 'deu': 'Deuteronomy',
+        'jos': 'Joshua', 'jdg': 'Judges', 'rut': 'Ruth', '1sa': '1 Samuel', '2sa': '2 Samuel',
+        '1ki': '1 Kings', '2ki': '2 Kings', '1ch': '1 Chronicles', '2ch': '2 Chronicles',
+        'ezr': 'Ezra', 'neh': 'Nehemiah', 'est': 'Esther', 'job': 'Job', 'psa': 'Psalms',
+        'pro': 'Proverbs', 'ecc': 'Ecclesiastes', 'sos': 'Song of Solomon', 'sol': 'Song of Solomon',
+        'isa': 'Isaiah', 'jer': 'Jeremiah', 'lam': 'Lamentations', 'eze': 'Ezekiel', 'dan': 'Daniel',
+        'hos': 'Hosea', 'jol': 'Joel', 'amo': 'Amos', 'oba': 'Obadiah', 'jon': 'Jonah',
+        'mic': 'Micah', 'nah': 'Nahum', 'hab': 'Habakkuk', 'zep': 'Zephaniah', 'hag': 'Haggai',
+        'zec': 'Zechariah', 'mal': 'Malachi',
+        
+        # New Testament - Standard abbreviations
+        'mat': 'Matthew', 'mar': 'Mark', 'luk': 'Luke', 'joh': 'John', 'act': 'Acts',
+        'rom': 'Romans', '1co': '1 Corinthians', '2co': '2 Corinthians', 'gal': 'Galatians',
+        'eph': 'Ephesians', 'phi': 'Philippians', 'col': 'Colossians', '1th': '1 Thessalonians',
+        '2th': '2 Thessalonians', '1ti': '1 Timothy', '2ti': '2 Timothy', 'tit': 'Titus',
+        'phm': 'Philemon', 'heb': 'Hebrews', 'jam': 'James', '1pe': '1 Peter', '2pe': '2 Peter',
+        '1jo': '1 John', '2jo': '2 John', '3jo': '3 John', 'jud': 'Jude', 'rev': 'Revelation',
+        
+        # Common full names and variations
+        'peter': 'Peter', 'pet': 'Peter', 'pt': 'Peter',
+        'john': 'John', 'jn': 'John',
+        'james': 'James', 'jm': 'James',
+        'jude': 'Jude', 'jud': 'Jude',
+        'samuel': 'Samuel', 'sam': 'Samuel',
+        'kings': 'Kings', 'kin': 'Kings',
+        'chronicles': 'Chronicles', 'chr': 'Chronicles',
+        'corinthians': 'Corinthians', 'cor': 'Corinthians',
+        'thessalonians': 'Thessalonians', 'thess': 'Thessalonians',
+        'timothy': 'Timothy', 'tim': 'Timothy',
+        'psalms': 'Psalms', 'psalm': 'Psalms', 'ps': 'Psalms',
+        'proverbs': 'Proverbs', 'prov': 'Proverbs', 'pr': 'Proverbs',
+        
+        # Creative shortforms and common misspellings
+        'genisis': 'Genesis', 'exodus': 'Exodus', 'levi': 'Leviticus', 'numbers': 'Numbers', 'deut': 'Deuteronomy',
+        'joshua': 'Joshua', 'judge': 'Judges', 'ruth': 'Ruth', 'kings': 'Kings', 'chronicles': 'Chronicles',
+        'ezra': 'Ezra', 'nehemiah': 'Nehemiah', 'esther': 'Esther', 'song': 'Song of Solomon',
+        'isaiah': 'Isaiah', 'jeremiah': 'Jeremiah', 'lamentations': 'Lamentations', 'ezekiel': 'Ezekiel',
+        'daniel': 'Daniel', 'hosea': 'Hosea', 'joel': 'Joel', 'amos': 'Amos', 'obadiah': 'Obadiah',
+        'jonah': 'Jonah', 'micah': 'Micah', 'nahum': 'Nahum', 'habakkuk': 'Habakkuk', 'zephaniah': 'Zephaniah',
+        'haggai': 'Haggai', 'zechariah': 'Zechariah', 'malachi': 'Malachi',
+        'matthew': 'Matthew', 'mark': 'Mark', 'luke': 'Luke', 'acts': 'Acts', 'romans': 'Romans',
+        'galatians': 'Galatians', 'ephesians': 'Ephesians', 'philippians': 'Philippians', 'colossians': 'Colossians',
+        'titus': 'Titus', 'philemon': 'Philemon', 'hebrews': 'Hebrews', 'revelation': 'Revelation', 'rev': 'Revelation',
+        
+        # Single letter codes
+        'g': 'Genesis', 'e': 'Exodus', 'l': 'Leviticus', 'n': 'Numbers', 'd': 'Deuteronomy',
+        'j': 'Joshua', 'jg': 'Judges', 'r': 'Ruth', 's1': '1 Samuel', 's2': '2 Samuel',
+        'k1': '1 Kings', 'k2': '2 Kings', 'c1': '1 Chronicles', 'c2': '2 Chronicles',
+        'z': 'Ezra', 'h': 'Nehemiah', 't': 'Esther', 'b': 'Job', 'p': 'Psalms',
+        'pr': 'Proverbs', 'ec': 'Ecclesiastes', 'so': 'Song of Solomon', 'i': 'Isaiah',
+        'je': 'Jeremiah', 'la': 'Lamentations', 'ek': 'Ezekiel', 'da': 'Daniel',
+        'ho': 'Hosea', 'jl': 'Joel', 'am': 'Amos', 'ob': 'Obadiah', 'jh': 'Jonah',
+        'mi': 'Micah', 'na': 'Nahum', 'hb': 'Habakkuk', 'zp': 'Zephaniah', 'hg': 'Haggai',
+        'zc': 'Zechariah', 'ml': 'Malachi', 'mt': 'Matthew', 'mk': 'Mark', 'lk': 'Luke',
+        'jn': 'John', 'ac': 'Acts', 'ro': 'Romans', 'co1': '1 Corinthians', 'co2': '2 Corinthians',
+        'ga': 'Galatians', 'ep': 'Ephesians', 'pp': 'Philippians', 'cl': 'Colossians',
+        'th1': '1 Thessalonians', 'th2': '2 Thessalonians', 'ti1': '1 Timothy', 'ti2': '2 Timothy',
+        'tt': 'Titus', 'pm': 'Philemon', 'hb': 'Hebrews', 'pe1': '1 Peter', 'pe2': '2 Peter',
+        'jo1': '1 John', 'jo2': '2 John', 'jo3': '3 John', 'jd': 'Jude', 'rv': 'Revelation'
+    }
+    
+    # Check for abbreviations first
+    if normalized_book in book_abbreviations:
+        normalized_book = book_abbreviations[normalized_book]
+    
     # Handle books with numbers (1, 2, 3 John, Peter, etc.)
     number_words = {
         '1': '1', '2': '2', '3': '3',
