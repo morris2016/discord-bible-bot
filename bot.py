@@ -6,6 +6,9 @@ import aiohttp
 import asyncio
 import os
 import time
+import re
+import subprocess
+import tempfile
 from mutagen.oggvorbis import OggVorbis
 from urllib.request import urlopen
 from tempfile import NamedTemporaryFile
@@ -21,8 +24,64 @@ pause_state = {}  # Track pause timing for each voice client
 # Format: {vcid: {'total_pause_time': float, 'pause_start_time': float | None}}
 playback_queue = {}  # Queue chapters for each voice client
 # Format: {vcid: [chapter_index1, chapter_index2, ...]}
+verse_range_playback = {}  # Track verse range playback
+# Format: {vcid: {'start_verse': int, 'end_verse': int, 'stop_after': bool}}
 
 MANIFEST_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.json"
+
+# === VERSE RANGE PARSING ===
+def parse_verse_reference(verse_ref):
+    """
+    Parse verse references like "2:13-14", "2:13", "2:13-15,17,20-22"
+    Returns tuple: (start_verse, end_verse, specific_verses)
+    """
+    if ':' not in verse_ref:
+        return None, None, []
+    
+    chapter_verse = verse_ref.split(':')
+    if len(chapter_verse) != 2:
+        return None, None, []
+    
+    chapter_part = chapter_verse[0].strip()
+    verse_part = chapter_verse[1].strip()
+    
+    # Parse verse ranges
+    specific_verses = set()
+    ranges = verse_part.split(',')
+    
+    for range_item in ranges:
+        range_item = range_item.strip()
+        if '-' in range_item:
+            # Handle ranges like "13-14"
+            start_verse, end_verse = map(int, range_item.split('-'))
+            specific_verses.update(range(start_verse, end_verse + 1))
+        else:
+            # Handle single verses like "13"
+            specific_verses.add(int(range_item))
+    
+    min_verse = min(specific_verses)
+    max_verse = max(specific_verses)
+    
+    return min_verse, max_verse, sorted(list(specific_verses))
+
+def get_verse_start_time(timestamps, target_verse):
+    """Get the start time for a specific verse from timestamps"""
+    for timestamp in timestamps:
+        if timestamp['verse'] == target_verse:
+            return timestamp['start']
+    return 0.0
+
+def get_verse_end_time(timestamps, target_verse):
+    """Get the end time for a specific verse from timestamps"""
+    for i, timestamp in enumerate(timestamps):
+        if timestamp['verse'] == target_verse:
+            # If this is the last verse, use the chapter duration
+            if i + 1 < len(timestamps):
+                return timestamps[i + 1]['start']
+            else:
+                # Estimate end time based on verse duration
+                return timestamp['start'] + 30.0  # Assume ~30 seconds per verse max
+    return None
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -31,7 +90,59 @@ intents.guilds = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# === AUDIO WRAPPER ===
+# === ENHANCED AUDIO WRAPPER WITH TIMESTAMP SEEKING ===
+class SafeAudioWithSeek(FFmpegPCMAudio):
+    def __init__(self, source_url, seek_time=None, end_time=None, method='hybrid'):
+        self.seek_time = seek_time
+        self.end_time = end_time
+        self.method = method
+        self.tempfile_path = None
+        
+        # Build FFmpeg options
+        before_opts = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+        options = "-vn -af apad=pad_dur=2"
+        
+        if seek_time and seek_time > 0:
+            if method == 'fast':
+                # Fast seeking using before_options (less accurate)
+                before_opts += f" -ss {seek_time}"
+            else:
+                # Use input seeking for better accuracy
+                before_opts += f" -ss {seek_time}"
+        
+        if end_time and end_time > seek_time:
+            duration = end_time - seek_time
+            options += f" -t {duration}"
+        
+        super().__init__(source_url, before_options=before_opts, options=options)
+        
+        try:
+            # Try to get duration information
+            if seek_time:
+                # For seeking, we'll use a simplified duration estimation
+                self.duration = (end_time - seek_time) if end_time else 60.0
+            else:
+                # Get actual duration for non-seeked audio
+                with urlopen(source_url) as response, NamedTemporaryFile(delete=False) as tmp_file:
+                    tmp_file.write(response.read())
+                    tmp_file.flush()
+                    audio = OggVorbis(tmp_file.name)
+                    self.duration = audio.info.length
+                    self.tempfile_path = tmp_file.name
+        except Exception as e:
+            print(f"Audio error: {e}")
+            self.duration = 60
+            self.tempfile_path = None
+        
+        self.start_time = time.time()
+
+    def elapsed(self):
+        return time.time() - self.start_time
+
+    def cleanup(self):
+        if self.tempfile_path and os.path.exists(self.tempfile_path):
+            os.remove(self.tempfile_path)
+
 class SafeAudio(FFmpegPCMAudio):
     def __init__(self, source_url):
         before_opts = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
@@ -291,15 +402,35 @@ async def handle_after_playback(error, vcid, source):
         print(f"Error: {error}")
     await asyncio.sleep(max(1.5, 10 - source.elapsed()))
     source.cleanup()
+    
     if vcid not in voice_clients or not voice_clients[vcid].is_connected():
         return
     
+    # Check if this is verse range playback that should stop
+    if vcid in verse_range_playback:
+        range_info = verse_range_playback[vcid]
+        if range_info.get('stop_after', False):
+            # Verse range completed, stop playback and clean up
+            vc = voice_clients[vcid]
+            vc.stop()
+            del verse_range_playback[vcid]
+            if vcid in active_verse_tasks:
+                active_verse_tasks[vcid].cancel()
+                del active_verse_tasks[vcid]
+            return
+    
     # Check if there are queued chapters to play next
     if vcid in playback_queue and playback_queue[vcid]:
-        next_index = playback_queue[vcid].pop(0)
+        next_item = playback_queue[vcid].pop(0)
         ctx = playback_contexts.get(vcid)
         if ctx:
-            await play_entry(ctx, next_index)
+            if isinstance(next_item, tuple):
+                # Handle verse range in queue
+                index, start_verse, end_verse = next_item
+                await play_entry(ctx, index, start_verse, end_verse)
+            else:
+                # Handle regular chapter in queue
+                await play_entry(ctx, next_item)
         return
     
     # Otherwise, play the next chapter from the manifest (sequential playback)
@@ -309,7 +440,70 @@ async def handle_after_playback(error, vcid, source):
         if ctx:
             await play_entry(ctx, next_index)
 
-async def play_entry(ctx, index):
+async def play_entry_with_verse_range(ctx, index, start_verse, end_verse):
+    """Play a specific verse range from a chapter"""
+    entry = manifest_data[index]
+    vcid = ctx.author.voice.channel.id
+
+    vc = voice_clients.get(vcid)
+    if not vc or not vc.is_connected():
+        vc = await ctx.author.voice.channel.connect()
+        voice_clients[vcid] = vc
+
+    # Check if something is already playing - if so, queue the new chapter
+    if vc.is_playing() or vc.is_paused():
+        if vcid not in playback_queue:
+            playback_queue[vcid] = []
+        playback_queue[vcid].append((index, start_verse, end_verse))
+        await ctx.send(f"📝 Added to queue: **{entry['book']} {entry['chapter']}:{start_verse}-{end_verse}** (Position {len(playback_queue[vcid])})")
+        return
+
+    if vc.is_playing():
+        vc.stop()
+    if vcid in active_verse_tasks:
+        active_verse_tasks[vcid].cancel()
+    
+    # Clean up pause state for new playback
+    pause_state[vcid] = {'total_pause_time': 0.0, 'pause_start_time': None}
+
+    playback_index[vcid] = index
+    playback_contexts[vcid] = ctx
+
+    # Calculate timestamps for verse range
+    timestamps = entry["timestamps"]
+    start_time = get_verse_start_time(timestamps, start_verse)
+    end_time = get_verse_end_time(timestamps, end_verse)
+    
+    # Use enhanced audio with seeking
+    source = SafeAudioWithSeek(entry["url"], seek_time=start_time, end_time=end_time)
+    vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(
+        handle_after_playback(e, vcid, source), bot.loop))
+
+    await ctx.send(f"▶️ Now playing: **{entry['book']} {entry['chapter']}:{start_verse}-{end_verse}**")
+
+    # Show control panel and autodelete old one
+    await send_panel(ctx.channel)
+
+    await asyncio.sleep(1.5)
+    
+    # Filter timestamps for verse range display
+    filtered_timestamps = [t for t in timestamps if start_verse <= t['verse'] <= end_verse]
+    task = asyncio.create_task(stream_verses(ctx.channel, filtered_timestamps, vcid))
+    active_verse_tasks[vcid] = task
+    
+    # Track verse range playback
+    verse_range_playback[vcid] = {
+        'start_verse': start_verse,
+        'end_verse': end_verse,
+        'stop_after': True
+    }
+
+async def play_entry(ctx, index, start_verse=None, end_verse=None):
+    """Enhanced play_entry that supports verse ranges"""
+    if start_verse is not None and end_verse is not None:
+        return await play_entry_with_verse_range(ctx, index, start_verse, end_verse)
+    
+    # Original play_entry logic for full chapter playback
     entry = manifest_data[index]
     vcid = ctx.author.voice.channel.id
 
@@ -351,27 +545,57 @@ async def play_entry(ctx, index):
     active_verse_tasks[vcid] = task
 
 # === COMMANDS ===
-@commands.hybrid_command(description="Play a specific Bible chapter")
+@commands.hybrid_command(description="Play a specific Bible chapter or verse range")
 async def play(ctx, *, args: str):
     # Parse the arguments manually to handle multi-word book names
     parts = args.strip().split()
     if len(parts) < 1:
-        return await ctx.send("❌ Please provide a book name and chapter.")
+        return await ctx.send("❌ Please provide a book name and chapter or verse range.")
     
-    # Try to find the chapter number (last part should be the chapter)
-    try:
-        chapter = int(parts[-1])
-        book_parts = parts[:-1]
-    except ValueError:
-        # If the last part isn't a number, assume chapter 1
-        chapter = 1
-        book_parts = parts
+    # Check if last part contains verse reference (contains colon)
+    last_part = parts[-1]
+    start_verse = None
+    end_verse = None
     
-    book = ' '.join(book_parts)
+    if ':' in last_part:
+        # Parse verse reference
+        chapter_verse = last_part.split(':')
+        if len(chapter_verse) == 2:
+            try:
+                chapter = int(chapter_verse[0])
+                verse_ref = chapter_verse[1]
+                
+                # Parse verse range
+                start_verse, end_verse, specific_verses = parse_verse_reference(verse_ref)
+                if start_verse is None:
+                    return await ctx.send("❌ Invalid verse reference format. Use format like '2:13-14' or '2:13'.")
+                
+                book_parts = parts[:-1]  # Everything except the last part with verse reference
+                book = ' '.join(book_parts)
+            except (ValueError, IndexError):
+                return await ctx.send("❌ Invalid chapter or verse format.")
+        else:
+            return await ctx.send("❌ Invalid verse reference format.")
+    else:
+        # No verse reference, play full chapter
+        try:
+            chapter = int(parts[-1])
+            book_parts = parts[:-1]
+        except ValueError:
+            # If the last part isn't a number, assume chapter 1
+            chapter = 1
+            book_parts = parts
+        
+        book = ' '.join(book_parts)
+    
     index = get_index(book, chapter)
     if index is None:
         return await ctx.send("❌ Chapter not found.")
-    await play_entry(ctx, index)
+    
+    if start_verse is not None and end_verse is not None:
+        await play_entry(ctx, index, start_verse, end_verse)
+    else:
+        await play_entry(ctx, index)
 
 @commands.hybrid_command(description="Show the Bible audio control panel")
 async def panel(ctx):
@@ -387,16 +611,23 @@ async def queue(ctx):
         return await ctx.send("📝 Queue is empty.")
     
     queue_list = []
-    for i, index in enumerate(playback_queue[vcid], 1):
-        entry = manifest_data[index]
-        queue_list.append(f"**{i}**. {entry['book']} {entry['chapter']}")
+    for i, item in enumerate(playback_queue[vcid], 1):
+        if isinstance(item, tuple):
+            # Handle verse range in queue
+            index, start_verse, end_verse = item
+            entry = manifest_data[index]
+            queue_list.append(f"**{i}**. {entry['book']} {entry['chapter']}:{start_verse}-{end_verse}")
+        else:
+            # Handle regular chapter in queue
+            entry = manifest_data[item]
+            queue_list.append(f"**{i}**. {entry['book']} {entry['chapter']}")
     
     embed = discord.Embed(
         title="📋 Playback Queue",
         description="\n".join(queue_list),
         color=discord.Color.blue()
     )
-    embed.set_footer(text=f"Total: {len(playback_queue[vcid])} chapter(s)")
+    embed.set_footer(text=f"Total: {len(playback_queue[vcid])} item(s)")
     await ctx.send(embed=embed)
 
 @commands.hybrid_command(description="Pause current playback")
@@ -456,6 +687,10 @@ async def next(ctx):
     if vcid in pause_state:
         del pause_state[vcid]
     
+    # Clear verse range playback state
+    if vcid in verse_range_playback:
+        del verse_range_playback[vcid]
+    
     await ctx.send("⏭️ Skipped to next chapter.")
 
 @commands.hybrid_command(description="Stop all playback and clear queue")
@@ -478,6 +713,8 @@ async def stop(ctx):
             del active_verse_tasks[vcid]
         if vcid in playback_queue:
             del playback_queue[vcid]
+        if vcid in verse_range_playback:
+            del verse_range_playback[vcid]
         
         await ctx.send("⏹ Stopped and cleared queue.")
     else:
@@ -665,6 +902,8 @@ async def send_panel(channel):
                     del active_verse_tasks[vcid]
                 if vcid in playback_queue:
                     del playback_queue[vcid]
+                if vcid in verse_range_playback:
+                    del verse_range_playback[vcid]
                 await interaction.response.send_message("⏹ Stopped and cleared queue.", ephemeral=True)
 
     if channel.id in last_panel_message:
