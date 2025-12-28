@@ -359,15 +359,9 @@ async def stream_verses(channel, timestamps, vcid):
     chunks = list(overlapping_chunks(timestamps, 7, overlap=1))
     base_start_time = time.time()
     
-    # Debug: Log when verse streaming task starts
-    start_time_str = time.strftime("%H:%M:%S")
-    print(f"[DEBUG] Verse streaming task started at {start_time_str} for {len(timestamps)} timestamps")
-    
     for i, group in enumerate(chunks):
         vc = voice_clients.get(vcid)
         if not vc or not vc.is_connected():
-            end_time_str = time.strftime("%H:%M:%S")
-            print(f"[DEBUG] Verse streaming task ended at {end_time_str} (disconnected)")
             return
             
         # Calculate effective elapsed time accounting for pauses
@@ -389,13 +383,9 @@ async def stream_verses(channel, timestamps, vcid):
             await asyncio.sleep(min(wait, 0.1))
             vc = voice_clients.get(vcid)
             if not vc or not vc.is_connected():
-                end_time_str = time.strftime("%H:%M:%S")
-                print(f"[DEBUG] Verse streaming task ended at {end_time_str} (disconnected)")
                 return
                 
         if vcid not in active_verse_tasks or active_verse_tasks[vcid].cancelled():
-            end_time_str = time.strftime("%H:%M:%S")
-            print(f"[DEBUG] Verse streaming task ended at {end_time_str} (cancelled)")
             return
 
         verses = []
@@ -403,33 +393,17 @@ async def stream_verses(channel, timestamps, vcid):
             verse = f"🔁 **{v['verse']}**. *{v['text']}*" if i > 0 and j == 0 else f"**{v['verse']}**. {v['text']}"
             verses.append(verse)
 
-        # Add debug timing information
-        current_time = time.strftime("%H:%M:%S")
-        expected_time = f"{group[0]['start']:.1f}s"
-        effective_elapsed = get_effective_elapsed()
-        actual_elapsed = f"{effective_elapsed:.1f}s"
-        
-        debug_info = f"🕐 Debug: Expected {expected_time}, Actual {actual_elapsed} (sent at {current_time})"
-        
         embed = discord.Embed(
             title="📖 Scripture Reading",
-            description="\n\n".join(verses) + f"\n\n{debug_info}",
+            description="\n\n".join(verses),
             color=discord.Color.teal()
         )
         embed.set_footer(text=f"Verses {group[0]['verse']}–{group[-1]['verse']}")
-        send_time = time.time()
         await channel.send(embed=embed)
-        
-        # Debug: Log when verse chunk is sent
-        send_time_str = time.strftime("%H:%M:%S")
-        print(f"[DEBUG] Sent verse chunk {group[0]['verse']}-{group[-1]['verse']} at {send_time_str} (elapsed: {get_effective_elapsed():.1f}s)")
         
         await asyncio.sleep(0.3)
     
-    # Task completed normally
-    end_time_str = time.strftime("%H:%M:%S")
-    total_elapsed = time.time() - base_start_time
-    print(f"[DEBUG] Verse streaming task completed normally at {end_time_str} (total duration: {total_elapsed:.1f}s)")
+
 
 # === PLAYBACK ===
 async def handle_after_playback(error, vcid, source):
