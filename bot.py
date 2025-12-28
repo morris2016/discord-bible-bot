@@ -519,8 +519,15 @@ async def play_entry_with_verse_range(ctx, index, start_verse, end_verse):
     # Show control panel and autodelete old one
     await send_panel(ctx.channel)
     
-    # Filter timestamps for verse range display
+    # Filter timestamps for verse range display and adjust timing
     filtered_timestamps = [t for t in timestamps if start_verse <= t['verse'] <= end_verse]
+    
+    # Adjust timestamps so first verse starts at 0.0s (for verse range playback)
+    if filtered_timestamps:
+        first_verse_start = filtered_timestamps[0]['start']
+        for timestamp in filtered_timestamps:
+            timestamp['start'] -= first_verse_start
+    
     task = asyncio.create_task(stream_verses(ctx.channel, filtered_timestamps, vcid))
     active_verse_tasks[vcid] = task
     
