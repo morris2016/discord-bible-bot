@@ -366,6 +366,8 @@ async def stream_verses(channel, timestamps, vcid):
     for i, group in enumerate(chunks):
         vc = voice_clients.get(vcid)
         if not vc or not vc.is_connected():
+            end_time_str = time.strftime("%H:%M:%S")
+            print(f"[DEBUG] Verse streaming task ended at {end_time_str} (disconnected)")
             return
             
         # Calculate effective elapsed time accounting for pauses
@@ -395,11 +397,6 @@ async def stream_verses(channel, timestamps, vcid):
             end_time_str = time.strftime("%H:%M:%S")
             print(f"[DEBUG] Verse streaming task ended at {end_time_str} (cancelled)")
             return
-    
-    # Task completed normally
-    end_time_str = time.strftime("%H:%M:%S")
-    total_elapsed = time.time() - base_start_time
-    print(f"[DEBUG] Verse streaming task completed normally at {end_time_str} (total duration: {total_elapsed:.1f}s)")
 
         verses = []
         for j, v in enumerate(group):
@@ -428,6 +425,11 @@ async def stream_verses(channel, timestamps, vcid):
         print(f"[DEBUG] Sent verse chunk {group[0]['verse']}-{group[-1]['verse']} at {send_time_str} (elapsed: {get_effective_elapsed():.1f}s)")
         
         await asyncio.sleep(0.3)
+    
+    # Task completed normally
+    end_time_str = time.strftime("%H:%M:%S")
+    total_elapsed = time.time() - base_start_time
+    print(f"[DEBUG] Verse streaming task completed normally at {end_time_str} (total duration: {total_elapsed:.1f}s)")
 
 # === PLAYBACK ===
 async def handle_after_playback(error, vcid, source):
