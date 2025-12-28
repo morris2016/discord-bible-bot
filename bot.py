@@ -32,32 +32,38 @@ MANIFEST_URL = "https://pub-9ced34a9f0ea4ebd9d5c6fe77774b23e.r2.dev/manifest.jso
 # === VERSE RANGE PARSING ===
 def parse_verse_reference(verse_ref):
     """
-    Parse verse references like "2:13-14", "2:13", "2:13-15,17,20-22"
+    Parse verse references like "3-5", "3", "1-2,5,8-10" (verse part only)
     Returns tuple: (start_verse, end_verse, specific_verses)
     """
-    if ':' not in verse_ref:
-        return None, None, []
+    verse_ref = verse_ref.strip()
     
-    chapter_verse = verse_ref.split(':')
-    if len(chapter_verse) != 2:
-        return None, None, []
-    
-    chapter_part = chapter_verse[0].strip()
-    verse_part = chapter_verse[1].strip()
-    
-    # Parse verse ranges
+    # Parse verse ranges (verse part only, not full chapter:verse)
     specific_verses = set()
-    ranges = verse_part.split(',')
+    ranges = verse_ref.split(',')
     
     for range_item in ranges:
         range_item = range_item.strip()
         if '-' in range_item:
             # Handle ranges like "13-14"
-            start_verse, end_verse = map(int, range_item.split('-'))
-            specific_verses.update(range(start_verse, end_verse + 1))
+            try:
+                start_verse, end_verse = map(int, range_item.split('-'))
+                if start_verse <= 0 or end_verse <= 0:
+                    return None, None, []
+                specific_verses.update(range(start_verse, end_verse + 1))
+            except (ValueError, IndexError):
+                return None, None, []
         else:
             # Handle single verses like "13"
-            specific_verses.add(int(range_item))
+            try:
+                verse_num = int(range_item)
+                if verse_num <= 0:
+                    return None, None, []
+                specific_verses.add(verse_num)
+            except ValueError:
+                return None, None, []
+    
+    if not specific_verses:
+        return None, None, []
     
     min_verse = min(specific_verses)
     max_verse = max(specific_verses)
@@ -558,7 +564,9 @@ async def play(ctx, *, args: str):
     end_verse = None
     
     if ':' in last_part:
-        # Parse verse reference
+        # Parse verse reference - support both formats:
+        # Format 1: "john 3:3-5" (chapter:verse)
+        # Format 2: "john 3 3-5" (chapter verse)
         chapter_verse = last_part.split(':')
         if len(chapter_verse) == 2:
             try:
@@ -576,6 +584,21 @@ async def play(ctx, *, args: str):
                 return await ctx.send("❌ Invalid chapter or verse format.")
         else:
             return await ctx.send("❌ Invalid verse reference format.")
+    elif len(parts) >= 3 and parts[-2].isdigit() and any(c in parts[-1] for c in '-,'):
+        # Handle format: "john 3 3-5" (book chapter verse_range)
+        try:
+            chapter = int(parts[-2])
+            verse_ref = parts[-1]
+            
+            # Parse verse range
+            start_verse, end_verse, specific_verses = parse_verse_reference(verse_ref)
+            if start_verse is None:
+                return await ctx.send("❌ Invalid verse reference format. Use format like 'john 3 3-5'.")
+            
+            book_parts = parts[:-2]  # Everything except the last two parts
+            book = ' '.join(book_parts)
+        except (ValueError, IndexError):
+            return await ctx.send("❌ Invalid chapter or verse format.")
     else:
         # No verse reference, play full chapter
         try:
