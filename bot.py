@@ -478,22 +478,34 @@ async def play_entry_with_verse_range(ctx, index, start_verse, end_verse):
     playback_index[vcid] = index
     playback_contexts[vcid] = ctx
 
-    # Calculate timestamps for verse range
+    # Calculate timestamps for verse range with contextual padding
     timestamps = entry["timestamps"]
-    start_time = get_verse_start_time(timestamps, start_verse)
-    end_time = get_verse_end_time(timestamps, end_verse)
+    
+    # Get all verses in the chapter to determine bounds
+    all_verses = [t['verse'] for t in timestamps]
+    min_verse = min(all_verses)
+    max_verse = max(all_verses)
+    
+    # Extend range by one verse before and after for context
+    # Handle edge cases where we can't extend before verse 1 or after the last verse
+    audio_start_verse = max(start_verse - 1, min_verse)  # One verse before, but not before chapter start
+    audio_end_verse = min(end_verse + 1, max_verse)      # One verse after, but not after chapter end
+    
+    # Calculate actual timing for the extended audio range
+    start_time = get_verse_start_time(timestamps, audio_start_verse)
+    end_time = get_verse_end_time(timestamps, audio_end_verse)
     
     # Use enhanced audio with seeking
     source = SafeAudioWithSeek(entry["url"], seek_time=start_time, end_time=end_time)
     vc.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(
         handle_after_playback(e, vcid, source), bot.loop))
 
-    await ctx.send(f"▶️ Now playing: **{entry['book']} {entry['chapter']}:{start_verse}-{end_verse}**")
+    await ctx.send(f"▶️ Now playing: **{entry['book']} {entry['chapter']}:{start_verse}-{end_verse}** (with context: {audio_start_verse}-{audio_end_verse})")
 
     # Show control panel and autodelete old one
     await send_panel(ctx.channel)
     
-    # Filter timestamps for verse range display and adjust timing
+    # Filter timestamps for verse range display (original requested range only)
     filtered_timestamps = [t for t in timestamps if start_verse <= t['verse'] <= end_verse]
     
     # Adjust timestamps so first verse starts at 0.0s (for verse range playback)
