@@ -521,13 +521,19 @@ async def stream_verses(channel, timestamps, vcid):
 
         verses = []
         for j, v in enumerate(group):
-            verse = f"🔁 **{v['verse']}**. *{v['text']}*" if i > 0 and j == 0 else f"**{v['verse']}**. {v['text']}"
+            # Use elegant formatting with verse number and text
+            if i > 0 and j == 0:
+                # Repeated verse indicator with softer emphasis
+                verse = f"🔁 **{v['verse']}**. *{v['text']}*"
+            else:
+                # Regular verse with clear number and readable text
+                verse = f"**{v['verse']}**. {v['text']}"
             verses.append(verse)
 
         embed = discord.Embed(
             title="📖 Scripture Reading",
             description="\n\n".join(verses),
-            color=discord.Color.teal()
+            color=discord.Color.from_rgb(106, 90, 205)  # Slate blue - elegant and readable
         )
         embed.set_footer(text=f"Verses {group[0]['verse']}–{group[-1]['verse']}")
         await channel.send(embed=embed)
