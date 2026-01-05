@@ -9,8 +9,11 @@ import time
 import re
 import subprocess
 import tempfile
+import socket
+import traceback
 from mutagen.oggvorbis import OggVorbis
 from urllib.request import urlopen
+from urllib.error import URLError, HTTPError
 from tempfile import NamedTemporaryFile
 
 # === GLOBAL STATE ===
@@ -72,21 +75,38 @@ def parse_verse_reference(verse_ref):
 
 def get_verse_start_time(timestamps, target_verse):
     """Get the start time for a specific verse from timestamps"""
+    if not timestamps or not isinstance(timestamps, list):
+        print("⚠️ Invalid timestamps array")
+        return 0.0
+    
     for timestamp in timestamps:
-        if timestamp['verse'] == target_verse:
-            return timestamp['start']
+        if not isinstance(timestamp, dict):
+            continue
+        if timestamp.get('verse') == target_verse:
+            return float(timestamp.get('start', 0.0))
+    
+    print(f"⚠️ Verse {target_verse} not found in timestamps")
     return 0.0
 
 def get_verse_end_time(timestamps, target_verse):
     """Get the end time for a specific verse from timestamps"""
+    if not timestamps or not isinstance(timestamps, list):
+        print("⚠️ Invalid timestamps array")
+        return None
+    
     for i, timestamp in enumerate(timestamps):
-        if timestamp['verse'] == target_verse:
+        if not isinstance(timestamp, dict):
+            continue
+        if timestamp.get('verse') == target_verse:
             # If this is the last verse, use the chapter duration
             if i + 1 < len(timestamps):
-                return timestamps[i + 1]['start']
-            else:
-                # Estimate end time based on verse duration
-                return timestamp['start'] + 30.0  # Assume ~30 seconds per verse max
+                next_start = timestamps[i + 1].get('start')
+                if next_start is not None:
+                    return float(next_start)
+            # Estimate end time based on verse duration
+            return float(timestamp.get('start', 0.0)) + 30.0  # Assume ~30 seconds per verse max
+    
+    print(f"⚠️ Verse {target_verse} not found in timestamps")
     return None
 
 intents = discord.Intents.default()
@@ -99,28 +119,37 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # === ENHANCED AUDIO WRAPPER WITH TIMESTAMP SEEKING ===
 class SafeAudioWithSeek(FFmpegPCMAudio):
     def __init__(self, source_url, seek_time=None, end_time=None, method='hybrid'):
-        self.seek_time = seek_time
+        # Validate inputs
+        if not source_url or not isinstance(source_url, str):
+            raise ValueError("Invalid audio URL")
+        if not source_url.startswith(('http://', 'https://')):
+            raise ValueError("URL must start with http:// or https://")
+        if seek_time and (seek_time < 0 or seek_time > 86400):  # Max 24 hours
+            raise ValueError("Invalid seek_time: must be between 0 and 86400 seconds")
+        if end_time and seek_time and end_time <= seek_time:
+            raise ValueError("end_time must be greater than seek_time")
+        
+        self.seek_time = max(0, seek_time) if seek_time else 0
         self.end_time = end_time
         self.method = method
         self.tempfile_path = None
         
-        # Build FFmpeg options
+        # Build FFmpeg options with safer formatting
         before_opts = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
         options = "-vn -af apad=pad_dur=2"
         
-        if seek_time and seek_time > 0:
-            if method == 'fast':
-                # Fast seeking using before_options (less accurate)
-                before_opts += f" -ss {seek_time}"
-            else:
-                # Use input seeking for better accuracy
-                before_opts += f" -ss {seek_time}"
+        if self.seek_time > 0:
+            before_opts += f" -ss {self.seek_time:.2f}"
         
-        if end_time and end_time > seek_time:
-            duration = end_time - seek_time
-            options += f" -t {duration}"
+        if end_time and end_time > self.seek_time:
+            duration = end_time - self.seek_time
+            options += f" -t {duration:.2f}"
         
-        super().__init__(source_url, before_options=before_opts, options=options)
+        try:
+            super().__init__(source_url, before_options=before_opts, options=options)
+        except Exception as e:
+            print(f"❌ FFmpeg initialization error: {e}")
+            raise
         
         try:
             # Try to get duration information
@@ -129,14 +158,19 @@ class SafeAudioWithSeek(FFmpegPCMAudio):
                 self.duration = (end_time - seek_time) if end_time else 60.0
             else:
                 # Get actual duration for non-seeked audio
-                with urlopen(source_url) as response, NamedTemporaryFile(delete=False) as tmp_file:
-                    tmp_file.write(response.read())
-                    tmp_file.flush()
-                    audio = OggVorbis(tmp_file.name)
-                    self.duration = audio.info.length
-                    self.tempfile_path = tmp_file.name
+                with urlopen(source_url, timeout=30) as response:
+                    with NamedTemporaryFile(delete=False) as tmp_file:
+                        tmp_file.write(response.read())
+                        tmp_file.flush()
+                        audio = OggVorbis(tmp_file.name)
+                        self.duration = audio.info.length
+                        self.tempfile_path = tmp_file.name
+        except (URLError, HTTPError, socket.timeout) as e:
+            print(f"🔌 Network error downloading audio metadata: {e}")
+            self.duration = 60
+            self.tempfile_path = None
         except Exception as e:
-            print(f"Audio error: {e}")
+            print(f"⚠️ Audio metadata error: {e}")
             self.duration = 60
             self.tempfile_path = None
         
@@ -146,42 +180,139 @@ class SafeAudioWithSeek(FFmpegPCMAudio):
         return time.time() - self.start_time
 
     def cleanup(self):
-        if self.tempfile_path and os.path.exists(self.tempfile_path):
-            os.remove(self.tempfile_path)
+        try:
+            if self.tempfile_path and os.path.exists(self.tempfile_path):
+                os.remove(self.tempfile_path)
+                self.tempfile_path = None
+        except Exception as e:
+            print(f"⚠️ Cleanup error: {e}")
 
 class SafeAudio(FFmpegPCMAudio):
     def __init__(self, source_url):
+        # Validate URL
+        if not source_url or not isinstance(source_url, str):
+            raise ValueError("Invalid audio URL")
+        if not source_url.startswith(('http://', 'https://')):
+            raise ValueError("URL must start with http:// or https://")
+        
         before_opts = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
         options = "-vn -af apad=pad_dur=2"
-        super().__init__(source_url, before_options=before_opts, options=options)
+        
         try:
-            with urlopen(source_url) as response, NamedTemporaryFile(delete=False) as tmp_file:
-                tmp_file.write(response.read())
-                tmp_file.flush()
-                audio = OggVorbis(tmp_file.name)
-                self.duration = audio.info.length
-                self.tempfile_path = tmp_file.name
+            super().__init__(source_url, before_options=before_opts, options=options)
         except Exception as e:
-            print(f"Audio error: {e}")
+            print(f"❌ FFmpeg initialization error: {e}")
+            raise
+        
+        try:
+            with urlopen(source_url, timeout=30) as response:
+                with NamedTemporaryFile(delete=False) as tmp_file:
+                    tmp_file.write(response.read())
+                    tmp_file.flush()
+                    audio = OggVorbis(tmp_file.name)
+                    self.duration = audio.info.length
+                    self.tempfile_path = tmp_file.name
+        except (URLError, HTTPError, socket.timeout) as e:
+            print(f"🔌 Network error downloading audio metadata: {e}")
             self.duration = 60
             self.tempfile_path = None
+        except Exception as e:
+            print(f"⚠️ Audio metadata error: {e}")
+            self.duration = 60
+            self.tempfile_path = None
+        
         self.start_time = time.time()
 
     def elapsed(self):
         return time.time() - self.start_time
 
     def cleanup(self):
-        if self.tempfile_path and os.path.exists(self.tempfile_path):
-            os.remove(self.tempfile_path)
+        try:
+            if self.tempfile_path and os.path.exists(self.tempfile_path):
+                os.remove(self.tempfile_path)
+                self.tempfile_path = None
+        except Exception as e:
+            print(f"⚠️ Cleanup error: {e}")
 
 # === UTILITIES ===
 async def fetch_manifest():
     global manifest_data
-    async with aiohttp.ClientSession() as session:
-        async with session.get(MANIFEST_URL) as resp:
-            if resp.status == 200:
-                manifest_data = await resp.json()
-                print(f"✅ Loaded {len(manifest_data)} chapters.")
+    max_retries = 3
+    
+    for attempt in range(max_retries):
+        try:
+            timeout = aiohttp.ClientTimeout(total=30)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(MANIFEST_URL) as resp:
+                    if resp.status == 200:
+                        manifest_data = await resp.json()
+                        print(f"✅ Loaded {len(manifest_data)} chapters.")
+                        return
+                    else:
+                        print(f"⚠️ Manifest fetch failed with status {resp.status}")
+        except asyncio.TimeoutError:
+            print(f"⏱️ Manifest fetch timeout (attempt {attempt + 1}/{max_retries})")
+        except aiohttp.ClientError as e:
+            print(f"🔌 Network error fetching manifest: {e}")
+        except Exception as e:
+            print(f"❌ Unexpected error fetching manifest: {e}")
+        
+        if attempt < max_retries - 1:
+            await asyncio.sleep(2 ** attempt)  # Exponential backoff
+    
+    print("❌ Failed to fetch manifest after retries")
+
+def cleanup_voice_state(vcid):
+    """Centralized cleanup for voice channel state"""
+    if vcid in voice_clients:
+        del voice_clients[vcid]
+    if vcid in playback_index:
+        del playback_index[vcid]
+    if vcid in playback_contexts:
+        del playback_contexts[vcid]
+    if vcid in active_verse_tasks:
+        try:
+            active_verse_tasks[vcid].cancel()
+        except:
+            pass
+        del active_verse_tasks[vcid]
+    if vcid in pause_state:
+        del pause_state[vcid]
+    if vcid in playback_queue:
+        del playback_queue[vcid]
+    if vcid in verse_range_playback:
+        del verse_range_playback[vcid]
+
+async def ensure_voice_connection(ctx, vcid):
+    """Ensure voice connection with retry logic"""
+    vc = voice_clients.get(vcid)
+    
+    if vc and vc.is_connected():
+        return vc
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            if vc:
+                try:
+                    await vc.disconnect(force=True)
+                except:
+                    pass
+            
+            vc = await ctx.author.voice.channel.connect(timeout=10.0, reconnect=True)
+            voice_clients[vcid] = vc
+            return vc
+        except asyncio.TimeoutError:
+            print(f"⏱️ Voice connection timeout (attempt {attempt + 1}/{max_retries})")
+        except discord.ClientException as e:
+            print(f"🔌 Voice connection error: {e}")
+        except Exception as e:
+            print(f"❌ Unexpected voice connection error: {e}")
+        
+        if attempt < max_retries - 1:
+            await asyncio.sleep(1)
+    
+    raise ConnectionError("Failed to establish voice connection after retries")
 
 def get_index(book: str, chapter: int):
     # Normalize book name for better matching
@@ -408,11 +539,26 @@ async def stream_verses(channel, timestamps, vcid):
 # === PLAYBACK ===
 async def handle_after_playback(error, vcid, source):
     if error:
-        print(f"Error: {error}")
-    await asyncio.sleep(max(1.5, 10 - source.elapsed()))
-    source.cleanup()
+        print(f"❌ Playback error (vcid={vcid}): {error}")
+        traceback.print_exc()
     
-    if vcid not in voice_clients or not voice_clients[vcid].is_connected():
+    # Adaptive sleep based on actual playback duration
+    actual_elapsed = source.elapsed()
+    expected_duration = getattr(source, 'duration', 10)
+    remaining = max(0.5, min(expected_duration - actual_elapsed, 10))
+    
+    await asyncio.sleep(remaining)
+    
+    try:
+        source.cleanup()
+    except Exception as e:
+        print(f"⚠️ Cleanup error: {e}")
+    
+    # Check voice connection is still valid
+    vc = voice_clients.get(vcid)
+    if not vc or not vc.is_connected():
+        print(f"🔌 Voice connection lost for vcid={vcid}")
+        cleanup_voice_state(vcid)
         return
     
     # Check if this is verse range playback that should stop
@@ -454,10 +600,10 @@ async def play_entry_with_verse_range(ctx, index, start_verse, end_verse):
     entry = manifest_data[index]
     vcid = ctx.author.voice.channel.id
 
-    vc = voice_clients.get(vcid)
-    if not vc or not vc.is_connected():
-        vc = await ctx.author.voice.channel.connect()
-        voice_clients[vcid] = vc
+    try:
+        vc = await ensure_voice_connection(ctx, vcid)
+    except ConnectionError as e:
+        return await ctx.send(f"❌ {e}")
 
     # Check if something is already playing - if so, queue the new chapter
     if vc.is_playing() or vc.is_paused():
@@ -533,10 +679,10 @@ async def play_entry(ctx, index, start_verse=None, end_verse=None):
     entry = manifest_data[index]
     vcid = ctx.author.voice.channel.id
 
-    vc = voice_clients.get(vcid)
-    if not vc or not vc.is_connected():
-        vc = await ctx.author.voice.channel.connect()
-        voice_clients[vcid] = vc
+    try:
+        vc = await ensure_voice_connection(ctx, vcid)
+    except ConnectionError as e:
+        return await ctx.send(f"❌ {e}")
 
     # Check if something is already playing - if so, queue the new chapter
     if vc.is_playing() or vc.is_paused():
@@ -957,7 +1103,7 @@ async def send_panel(channel):
     panel_msg = await channel.send("🎛️ Bible Audio Control Panel", view=AudioControlPanel())
     last_panel_message[channel.id] = panel_msg
 
-# === READY EVENT ===
+# === EVENTS ===
 @bot.event
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
@@ -970,6 +1116,14 @@ async def on_ready():
     bot.add_command(resume)
     bot.add_command(next)
     bot.add_command(stop)
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    """Clean up when bot is disconnected from voice"""
+    if member == bot.user and before.channel and not after.channel:
+        vcid = before.channel.id
+        cleanup_voice_state(vcid)
+        print(f"🧹 Cleaned up state for voice channel {vcid}")
 
 # === LAUNCH BOT ===
 bot.run(os.getenv("BOT_TOKEN"))  # ✅ For Railway / Heroku deploy
