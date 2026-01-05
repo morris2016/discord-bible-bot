@@ -521,13 +521,21 @@ async def stream_verses(channel, timestamps, vcid):
 
         verses = []
         for j, v in enumerate(group):
-            # The text already includes the verse number, so we don't need to add it again
+            # Clean the text by removing any leading verse number if it exists
+            text = v['text'].strip()
+            # Remove verse number pattern like "1. " or "13. " from the beginning
+            import re
+            text = re.sub(r'^\d+\.\s*', '', text)
+
+            # Add the verse number back in a clean format
+            clean_verse = f"**{v['verse']}**. {text}"
+
             if i > 0 and j == 0:
                 # Repeated verse indicator with softer emphasis
-                verse = f"🔁 *{v['text']}*"
+                verse = f"🔁 *{clean_verse}*"
             else:
                 # Regular verse display
-                verse = v['text']
+                verse = clean_verse
             verses.append(verse)
 
         embed = discord.Embed(
