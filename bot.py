@@ -305,9 +305,11 @@ async def ensure_voice_connection(ctx, vcid):
         except asyncio.TimeoutError:
             print(f"⏱️ Voice connection timeout (attempt {attempt + 1}/{max_retries})")
         except discord.ClientException as e:
-            print(f"🔌 Voice connection error: {e}")
+            print(f"🔌 Voice connection error (attempt {attempt + 1}/{max_retries}): {type(e).__name__}: {e}")
+            traceback.print_exc()
         except Exception as e:
-            print(f"❌ Unexpected voice connection error: {e}")
+            print(f"❌ Unexpected voice connection error (attempt {attempt + 1}/{max_retries}): {type(e).__name__}: {e}")
+            traceback.print_exc()
         
         if attempt < max_retries - 1:
             await asyncio.sleep(1)
