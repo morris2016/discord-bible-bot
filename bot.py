@@ -484,72 +484,93 @@ def get_index(book: str, chapter: int):
 
 # === STREAMER ===
 async def stream_verses(channel, timestamps, vcid):
-    def overlapping_chunks(data, size, overlap=1):
-        step = size - overlap
-        for i in range(0, len(data), step):
-            yield data[i:i + size]
+    if not timestamps:
+        return
 
-    chunks = list(overlapping_chunks(timestamps, 7, overlap=1))
+    total = len(timestamps)
     base_start_time = time.time()
-    
-    for i, group in enumerate(chunks):
+
+    # Look up book/chapter from current playback state
+    idx = playback_index.get(vcid)
+    entry = manifest_data[idx] if idx is not None and idx < len(manifest_data) else None
+    chapter_label = f"{entry['book']} {entry['chapter']}" if entry else "Scripture"
+
+    def clean_text(raw):
+        return re.sub(r'^\d+\.\s*', '', raw.strip())
+
+    def progress_bar(current, total, width=18):
+        filled = round(current / total * width)
+        return '█' * filled + '░' * (width - filled)
+
+    def build_embed(current_idx):
+        lines = []
+        window_start = max(0, current_idx - 2)
+        window_end   = min(total, current_idx + 5)
+
+        for i in range(window_start, window_end):
+            v    = timestamps[i]
+            text = clean_text(v['text'])
+            num  = v['verse']
+            if i == current_idx:
+                lines.append(f'▶  **{num}.** {text}')
+            elif i < current_idx:
+                lines.append(f'*{num}. {text}*')
+            else:
+                lines.append(f'{num}. {text}')
+
+        v_cur  = timestamps[current_idx]['verse']
+        v_last = timestamps[-1]['verse']
+        bar    = progress_bar(current_idx + 1, total)
+        footer = f'{bar}  ·  Verse {v_cur} of {v_last}'
+
+        embed = discord.Embed(
+            description='
+
+'.join(lines),
+            color=discord.Color.from_rgb(106, 90, 205)
+        )
+        embed.set_author(name=f'📖 {chapter_label}')
+        embed.set_footer(text=footer)
+        return embed
+
+    def get_effective_elapsed():
+        current_elapsed = time.time() - base_start_time
+        pause_info = pause_state.get(vcid, {'total_pause_time': 0.0, 'pause_start_time': None})
+        current_elapsed -= pause_info['total_pause_time']
+        if pause_info['pause_start_time']:
+            current_elapsed -= (time.time() - pause_info['pause_start_time'])
+        return max(0, current_elapsed)
+
+    live_msg = None  # single message we keep editing
+
+    for i, v in enumerate(timestamps):
         vc = voice_clients.get(vcid)
         if not vc or not vc.is_connected():
             return
-            
-        # Calculate effective elapsed time accounting for pauses
-        def get_effective_elapsed():
-            current_elapsed = time.time() - base_start_time
-            pause_info = pause_state.get(vcid, {'total_pause_time': 0.0, 'pause_start_time': None})
-            # Subtract accumulated pause time
-            current_elapsed -= pause_info['total_pause_time']
-            # If currently paused, subtract the current pause duration too
-            if pause_info['pause_start_time']:
-                current_elapsed -= (time.time() - pause_info['pause_start_time'])
-            return max(0, current_elapsed)  # Ensure non-negative
 
+        # Wait until this verse's timestamp
         while True:
-            effective_elapsed = get_effective_elapsed()
-            wait = group[0]["start"] - effective_elapsed
+            wait = v['start'] - get_effective_elapsed()
             if wait <= 0:
                 break
-            await asyncio.sleep(min(wait, 0.1))
+            await asyncio.sleep(min(wait, 0.05))
             vc = voice_clients.get(vcid)
             if not vc or not vc.is_connected():
                 return
-                
+
         if vcid not in active_verse_tasks or active_verse_tasks[vcid].cancelled():
             return
 
-        verses = []
-        for j, v in enumerate(group):
-            # Clean the text by removing any leading verse number if it exists
-            text = v['text'].strip()
-            # Remove verse number pattern like "1. " or "13. " from the beginning
-            import re
-            text = re.sub(r'^\d+\.\s*', '', text)
+        embed = build_embed(i)
 
-            # Add the verse number back in a clean format
-            clean_verse = f"**{v['verse']}**. {text}"
+        if live_msg is None:
+            live_msg = await channel.send(embed=embed)
+        else:
+            try:
+                await live_msg.edit(embed=embed)
+            except (discord.NotFound, discord.HTTPException):
+                live_msg = await channel.send(embed=embed)
 
-            if i > 0 and j == 0:
-                # Repeated verse indicator with softer emphasis
-                verse = f"🔁 *{clean_verse}*"
-            else:
-                # Regular verse display
-                verse = clean_verse
-            verses.append(verse)
-
-        embed = discord.Embed(
-            title="📖 Scripture Reading",
-            description="\n\n".join(verses),
-            color=discord.Color.from_rgb(106, 90, 205)  # Slate blue - elegant and readable
-        )
-        embed.set_footer(text=f"Verses {group[0]['verse']}–{group[-1]['verse']}")
-        await channel.send(embed=embed)
-        
-        await asyncio.sleep(0.3)
-    
 
 
 # === PLAYBACK ===
