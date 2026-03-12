@@ -975,32 +975,52 @@ async def send_panel(channel):
             all_books = [entry["book"] for entry in manifest_data]
             self.sorted_books = [book for book in canonical_order if book in all_books and not (book in seen or seen.add(book))]
 
-            self.book_select = discord.ui.Select(placeholder="📚 Select a book...", options=[], row=0)
+            # Section selector to split 66 books into groups that fit 25-item limit
+            ot_set = set(canonical_order[:39])
+            nt_set = set(canonical_order[39:])
+            self.ot_books = [b for b in self.sorted_books if b in ot_set]
+            self.nt_books = [b for b in self.sorted_books if b in nt_set]
+            # Split OT into Law/History (Gen-Esther=17) and Poetry/Prophets (Job-Malachi=22)
+            ot_split = canonical_order.index("Job")  # 17
+            ot_set1 = set(canonical_order[:ot_split])
+            ot_set2 = set(canonical_order[ot_split:39])
+            self.book_sections = {
+                "Law & History": [b for b in self.sorted_books if b in ot_set1],
+                "Poetry & Prophets": [b for b in self.sorted_books if b in ot_set2],
+                "New Testament": self.nt_books,
+            }
+
+            self.section_select = discord.ui.Select(
+                placeholder="📖 Old Testament or New Testament...",
+                options=[
+                    discord.SelectOption(label="Law & History", description="Genesis — Esther", emoji="📜"),
+                    discord.SelectOption(label="Poetry & Prophets", description="Job — Malachi", emoji="📖"),
+                    discord.SelectOption(label="New Testament", description="Matthew — Revelation", emoji="✝️"),
+                ],
+                row=0
+            )
+            self.section_select.callback = self.section_selected
+            self.add_item(self.section_select)
+
+            self.book_select = discord.ui.Select(placeholder="📚 Select a book...", options=[discord.SelectOption(label="Pick testament first", value="_")], disabled=True, row=1)
             self.book_select.callback = self.book_selected
             self.add_item(self.book_select)
 
-            self.prev_book_page = Button(label="⬅️ Book Page", style=discord.ButtonStyle.secondary, row=1)
-            self.next_book_page = Button(label="➡️ Book Page", style=discord.ButtonStyle.secondary, row=1)
-            self.prev_book_page.callback = self.prev_book
-            self.next_book_page.callback = self.next_book
-            self.add_item(self.prev_book_page)
-            self.add_item(self.next_book_page)
-
-            self.chapter_select = discord.ui.Select(placeholder="🔢 Select chapter...", options=[discord.SelectOption(label="1")], row=2)
+            self.chapter_select = discord.ui.Select(placeholder="🔢 Select chapter...", options=[discord.SelectOption(label="Pick book first", value="_")], disabled=True, row=2)
             self.chapter_select.callback = self.chapter_changed
             self.add_item(self.chapter_select)
 
-            self.prev_button = Button(label="⬅️ Chapter Page", style=discord.ButtonStyle.secondary, row=3)
-            self.next_button = Button(label="➡️ Chapter Page", style=discord.ButtonStyle.secondary, row=3)
-            self.prev_button.callback = self.prev_page
-            self.next_button.callback = self.next_page
-            self.add_item(self.prev_button)
-            self.add_item(self.next_button)
+            self.prev_ch_page = Button(label="◀", style=discord.ButtonStyle.secondary, row=3)
+            self.next_ch_page = Button(label="▶", style=discord.ButtonStyle.secondary, row=3)
+            self.prev_ch_page.callback = self.prev_chapter_page
+            self.next_ch_page.callback = self.next_chapter_page
+            self.add_item(self.prev_ch_page)
+            self.add_item(self.next_ch_page)
 
-            self.play_button = Button(label="▶️ Play", style=discord.ButtonStyle.green, row=4)
-            self.pause_button = Button(label="⏸ Pause", style=discord.ButtonStyle.blurple, row=4)
-            self.resume_button = Button(label="▶ Resume", style=discord.ButtonStyle.green, row=4)
-            self.stop_button = Button(label="⏹ Stop", style=discord.ButtonStyle.red, row=4)
+            self.play_button = Button(label="Play", style=discord.ButtonStyle.green, emoji="▶️", row=4)
+            self.pause_button = Button(label="Pause", style=discord.ButtonStyle.blurple, emoji="⏸", row=4)
+            self.resume_button = Button(label="Resume", style=discord.ButtonStyle.green, emoji="▶", row=4)
+            self.stop_button = Button(label="Stop", style=discord.ButtonStyle.red, emoji="⏹", row=4)
             self.play_button.callback = self.play
             self.pause_button.callback = self.pause
             self.resume_button.callback = self.resume
@@ -1010,75 +1030,55 @@ async def send_panel(channel):
             self.add_item(self.resume_button)
             self.add_item(self.stop_button)
 
-            self.update_book_dropdown()
-
-        def update_book_dropdown(self):
-            start = self.book_page * 25
-            end = start + 25
-            sliced = self.sorted_books[start:end]
-            self.book_select.options = [discord.SelectOption(label=book) for book in sliced]
+        async def section_selected(self, interaction):
+            chosen = self.section_select.values[0]
+            books = self.book_sections.get(chosen, [])
+            self.book_select.options = [discord.SelectOption(label=book) for book in books[:25]]
+            self.book_select.disabled = False
+            self.book_select.placeholder = f"📚 Select a book..."
+            # Reset chapter select
+            self.chapter_select.options = [discord.SelectOption(label="Pick book first", value="_")]
+            self.chapter_select.disabled = True
+            await interaction.response.edit_message(view=self)
 
         async def book_selected(self, interaction):
             self.selected_book = self.book_select.values[0]
             self.all_chapters = sorted({int(e["chapter"]) for e in manifest_data if e["book"] == self.selected_book})
             self.chapter_page = 0
-            await self.update_chapter_dropdown()
-            
-            # Update main message to show current selection
-            selection_text = f"📘 {self.selected_book} {self.selected_chapter}"
+            self._update_chapter_dropdown()
+            self.chapter_select.disabled = False
+            selection_text = f"📘 **{self.selected_book}**"
             await interaction.response.edit_message(content=selection_text, view=self)
 
         async def chapter_changed(self, interaction):
             self.selected_chapter = int(self.chapter_select.values[0])
-            
-            # Update main message to show current selection
-            selection_text = f"📘 {self.selected_book} {self.selected_chapter}"
+            selection_text = f"📘 **{self.selected_book} {self.selected_chapter}**"
             await interaction.response.edit_message(content=selection_text, view=self)
 
-        async def update_chapter_dropdown(self):
+        def _update_chapter_dropdown(self):
             start = self.chapter_page * 25
             end = start + 25
-            self.chapter_select.options = [
-                discord.SelectOption(label=str(ch)) for ch in self.all_chapters[start:end]
-            ]
+            sliced = self.all_chapters[start:end]
+            total_pages = (len(self.all_chapters) - 1) // 25 + 1
+            if total_pages > 1:
+                ch_start, ch_end = sliced[0], sliced[-1]
+                self.chapter_select.placeholder = f"🔢 Chapters {ch_start}–{ch_end}  ({self.chapter_page+1}/{total_pages})"
+            else:
+                self.chapter_select.placeholder = f"🔢 {self.selected_book} chapter..."
+            self.chapter_select.options = [discord.SelectOption(label=str(ch)) for ch in sliced]
 
-        async def prev_book(self, interaction):
-            if self.book_page > 0:
-                self.book_page -= 1
-                self.update_book_dropdown()
-                
-                # Update main message to show current selection
-                selection_text = f"📘 {self.selected_book} {self.selected_chapter}" if self.selected_book else "🎛️ Bible Audio Control Panel"
-                await interaction.response.edit_message(content=selection_text, view=self)
-
-        async def next_book(self, interaction):
-            max_pages = (len(self.sorted_books) - 1) // 25
-            if self.book_page < max_pages:
-                self.book_page += 1
-                self.update_book_dropdown()
-                
-                # Update main message to show current selection
-                selection_text = f"📘 {self.selected_book} {self.selected_chapter}" if self.selected_book else "🎛️ Bible Audio Control Panel"
-                await interaction.response.edit_message(content=selection_text, view=self)
-
-        async def prev_page(self, interaction):
+        async def prev_chapter_page(self, interaction):
             if self.chapter_page > 0:
                 self.chapter_page -= 1
-                await self.update_chapter_dropdown()
-                
-                # Update main message to show current selection
-                selection_text = f"📘 {self.selected_book} {self.selected_chapter}" if self.selected_book else "🎛️ Bible Audio Control Panel"
-                await interaction.response.edit_message(content=selection_text, view=self)
+                self._update_chapter_dropdown()
+            await interaction.response.edit_message(view=self)
 
-        async def next_page(self, interaction):
-            max_pages = (len(self.all_chapters) - 1) // 25
-            if self.chapter_page < max_pages:
+        async def next_chapter_page(self, interaction):
+            max_page = (len(self.all_chapters) - 1) // 25
+            if self.chapter_page < max_page:
                 self.chapter_page += 1
-                await self.update_chapter_dropdown()
-                
-                # Update main message to show current selection
-                selection_text = f"📘 {self.selected_book} {self.selected_chapter}" if self.selected_book else "🎛️ Bible Audio Control Panel"
-                await interaction.response.edit_message(content=selection_text, view=self)
+                self._update_chapter_dropdown()
+            await interaction.response.edit_message(view=self)
 
         async def play(self, interaction):
             await interaction.response.send_message("▶️ Playing...", ephemeral=True)
