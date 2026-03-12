@@ -541,14 +541,17 @@ async def stream_verses(channel, timestamps, vcid):
 
     live_msg = None  # single message we keep editing
 
+    # Lead time to compensate for Discord message edit latency + FFmpeg buffering
+    VERSE_LEAD_TIME = 1.5  # seconds ahead of audio
+
     for i, v in enumerate(timestamps):
         vc = voice_clients.get(vcid)
         if not vc or not vc.is_connected():
             return
 
-        # Wait until this verse's timestamp
+        # Wait until this verse's timestamp (minus lead time so arrow stays in sync)
         while True:
-            wait = v['start'] - get_effective_elapsed()
+            wait = v['start'] - VERSE_LEAD_TIME - get_effective_elapsed()
             if wait <= 0:
                 break
             await asyncio.sleep(min(wait, 0.05))
