@@ -730,7 +730,7 @@ async def play_entry(ctx, index, start_verse=None, end_verse=None):
     active_verse_tasks[vcid] = task
 
 # === COMMANDS ===
-@commands.hybrid_command(description="Play a specific Bible chapter or verse range")
+@bot.hybrid_command(description="Play a specific Bible chapter or verse range")
 async def play(ctx, *, args: str):
     # Parse the arguments manually to handle multi-word book names
     parts = args.strip().split()
@@ -799,11 +799,11 @@ async def play(ctx, *, args: str):
     else:
         await play_entry(ctx, index)
 
-@commands.hybrid_command(description="Show the Bible audio control panel")
+@bot.hybrid_command(description="Show the Bible audio control panel")
 async def panel(ctx):
     await send_panel(ctx.channel)
 
-@commands.hybrid_command(description="Show current playback queue")
+@bot.hybrid_command(description="Show current playback queue")
 async def queue(ctx):
     if not ctx.author.voice or not ctx.author.voice.channel:
         return await ctx.send("❌ Join a VC first.")
@@ -832,7 +832,7 @@ async def queue(ctx):
     embed.set_footer(text=f"Total: {len(playback_queue[vcid])} item(s)")
     await ctx.send(embed=embed)
 
-@commands.hybrid_command(description="Pause current playback")
+@bot.hybrid_command(description="Pause current playback")
 async def pause(ctx):
     if not ctx.author.voice or not ctx.author.voice.channel:
         return await ctx.send("❌ Join a VC first.")
@@ -849,7 +849,7 @@ async def pause(ctx):
     else:
         await ctx.send("❌ Nothing is playing.")
 
-@commands.hybrid_command(description="Resume paused playback")
+@bot.hybrid_command(description="Resume paused playback")
 async def resume(ctx):
     if not ctx.author.voice or not ctx.author.voice.channel:
         return await ctx.send("❌ Join a VC first.")
@@ -867,8 +867,8 @@ async def resume(ctx):
     else:
         await ctx.send("❌ Nothing is paused.")
 
-@commands.hybrid_command(description="Skip to next chapter in queue")
-async def next(ctx):
+@bot.hybrid_command(name="next", description="Skip to next chapter in queue")
+async def next_chapter(ctx):
     if not ctx.author.voice or not ctx.author.voice.channel:
         return await ctx.send("❌ Join a VC first.")
     
@@ -895,7 +895,7 @@ async def next(ctx):
     
     await ctx.send("⏭️ Skipped to next chapter.")
 
-@commands.hybrid_command(description="Stop all playback and clear queue")
+@bot.hybrid_command(description="Stop all playback and clear queue")
 async def stop(ctx):
     if not ctx.author.voice or not ctx.author.voice.channel:
         return await ctx.send("❌ Join a VC first.")
@@ -1122,14 +1122,11 @@ async def send_panel(channel):
 async def on_ready():
     print(f"✅ Logged in as {bot.user}")
     await fetch_manifest()
-    await bot.tree.sync()
-    bot.add_command(play)
-    bot.add_command(panel)
-    bot.add_command(queue)
-    bot.add_command(pause)
-    bot.add_command(resume)
-    bot.add_command(next)
-    bot.add_command(stop)
+    try:
+        synced = await bot.tree.sync()
+        print(f"✅ Synced {len(synced)} slash command(s)")
+    except Exception as e:
+        print(f"❌ Failed to sync commands: {e}")
 
 @bot.event
 async def on_voice_state_update(member, before, after):

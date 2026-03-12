@@ -1,12 +1,11 @@
 [phases.setup]
-nixPkgs = ["libsodium", "python39Full", "ffmpeg"]
+nixPkgs = ["libsodium", "python312Full", "ffmpeg"]
 
 [phases.install]
 cmds = [
   "python -m venv /opt/venv",
-  ". /opt/venv/bin/activate",
-  "pip install -r requirements.txt"
+  "/opt/venv/bin/pip install --no-cache-dir -r requirements.txt"
 ]
 
 [phases.start]
-cmd = "python bot.py"
+cmd = "/opt/venv/bin/python bot.py"
