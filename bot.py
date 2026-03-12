@@ -524,9 +524,7 @@ async def stream_verses(channel, timestamps, vcid):
         footer = f'{bar}  ·  Verse {v_cur} of {v_last}'
 
         embed = discord.Embed(
-            description='
-
-'.join(lines),
+            description='\n\n'.join(lines),
             color=discord.Color.from_rgb(106, 90, 205)
         )
         embed.set_author(name=f'📖 {chapter_label}')
